@@ -333,6 +333,12 @@ pub struct PauseGame;
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct UnpauseGame;
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct Wait {
+    #[serde(default)]
+    pub distress_signal: bool,
+}
+
 #[derive(Actions, Debug)]
 pub enum FtlActions {
     /// Skip credits
@@ -569,4 +575,10 @@ pub enum FtlActions {
     /// Unpause the game, progressing the game.
     #[name = "unpause"]
     Unpause(UnpauseGame),
+    /// Wait for a single turn instead of doing an FTL jump. The rebels' fleet will progress
+    /// towards you as usual. If you set `distress_signal` to `true`, your ship will send out a
+    /// distress signal, broadcasting your location to ships that pass nearby. If you have no fuel,
+    /// this is your only way to get fuel.
+    #[name = "skip_turn"]
+    Wait(Wait),
 }

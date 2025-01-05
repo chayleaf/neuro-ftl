@@ -1856,14 +1856,41 @@ impl neuro_sama::game::GameMut for State {
                     }
                 }
             },
+            FtlActions::Wait(event) => unsafe {
+                if !self.actions.valid1(&event) {
+                    Err(Cow::from("can't skip your turn at the time").into())
+                } else {
+                    let s = &mut *(*(*app).gui).star_map;
+                    s.close_button.base.b_hover = false;
+                    if s.distress_button.state != event.distress_signal {
+                        s.distress_button.base.base.b_hover = true;
+                        (*s.base.vtable).mouse_click(ptr::addr_of_mut!(s.base), 0, 0);
+                    }
+                    s.distress_button.base.base.b_hover = false;
+                    s.wait_button.base.b_hover = true;
+                    (*s.base.vtable).mouse_click(ptr::addr_of_mut!(s.base), 0, 0);
+                    Ok(Cow::from("waiting...").into())
+                }
+            },
             FtlActions::NextSector(event) => unsafe {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't go to the next sector at the time").into())
                 } else {
                     let s = &mut *(*(*app).gui).star_map;
-                    s.b_choosing_new_sector = true;
-                    s.potential_sector_choice = -1;
-                    Ok(Cow::from("opened next sector selection").into())
+                    if s.b_secret_sector {
+                        s.close_button.base.b_hover = false;
+                        s.distress_button.base.base.b_hover = false;
+                        s.wait_button.base.b_hover = false;
+                        s.end_button.base.b_hover = true;
+                        Ok(Cow::from(
+                            "you get moved to the bonus secret sector, can't select the next sector for now",
+                        )
+                        .into())
+                    } else {
+                        s.b_choosing_new_sector = true;
+                        s.potential_sector_choice = -1;
+                        Ok(Cow::from("opened next sector selection").into())
+                    }
                 }
             },
             FtlActions::ChooseNextSector(event) => unsafe {
@@ -2382,8 +2409,10 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
     }
     if (*(*gui).star_map).base.b_open {
         ret.add::<actions::Back>();
+        // TODO:
         // ret.add::<actions::NextSector>();
         // ret.add::<actions::ChooseNextSector>();
+        // ret.add::<actions::Wait>();
         // ret.add::<actions::Jump>();
         return ret;
     }
