@@ -106,7 +106,7 @@ impl Pak {
     }
 }
 
-pub struct WindowsDatEntry {
+/*pub struct WindowsDatEntry {
     offset: usize,
     filesize: usize,
 }
@@ -178,12 +178,12 @@ impl WindowsDat {
             .flat_map(|x| std::str::from_utf8(x).ok().map(|x| x.to_owned()))
             .collect()
     }
-}
+}*/
 
-#[cfg(target_os = "linux")]
+// #[cfg(target_os = "linux")]
 pub type Data = Pak;
-#[cfg(target_os = "windows")]
-pub type Data = WindowsDat;
+// #[cfg(target_os = "windows")]
+// pub type Data = WindowsDat;
 
 #[cfg(test)]
 mod test {
@@ -191,8 +191,7 @@ mod test {
 
     #[test]
     fn test() {
-        let path =
-            "/data/data/Games/SteamLibrary/steamapps/common/FTL Faster Than Light/data/ftl.dat";
+        let path = "/data/data/Games/SteamLibrary/steamapps/common/FTL Faster Than Light/ftl.dat";
         let mut file = Pak::open(path).unwrap();
         assert!(file
             .read("data/text_misc.xml")
