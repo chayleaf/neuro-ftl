@@ -1347,10 +1347,13 @@ pub struct CompleteShip {
     pub enemy_ship: *mut CompleteShip,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x28)]
     pub b_player_ship: bool,
+    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 24)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x30)]
     pub ship_ai: ShipAI,
+    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x118)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x1e0)]
     pub arriving_party: Vector<*mut CrewMember>,
+    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x124)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x1f8)]
     pub leaving_party: Vector<*mut CrewMember>,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x210)]
@@ -4653,6 +4656,7 @@ pub struct ParticleEmitter {
 // XXX: maps are really annoying to go through so not gonna bother recreating this
 #[repr(C)]
 #[derive(Debug)]
+#[cfg(target_pointer_width = "64")]
 pub struct Map<K, V> {
     pub a0: u64,
     pub a1: u64,
@@ -4660,6 +4664,19 @@ pub struct Map<K, V> {
     pub a3: u64,
     pub a4: u64,
     pub a5: u64,
+    pub ph: PhantomData<(K, V)>,
+}
+
+#[repr(C)]
+#[derive(Debug)]
+#[cfg(not(target_pointer_width = "64"))]
+pub struct Map<K, V> {
+    pub a0: u32,
+    pub a1: u32,
+    pub a2: u32,
+    pub a3: u32,
+    pub a4: u32,
+    pub a5: u32,
     pub ph: PhantomData<(K, V)>,
 }
 

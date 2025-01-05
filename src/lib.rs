@@ -199,19 +199,27 @@ static mut POWER_MANAGERS: *mut bindings::Vector<bindings::PowerManager> = ptr::
 
 static mut SHIP_GRAPHS: *mut bindings::Vector<bindings::ShipGraph> = ptr::null_mut();
 
+// win: 4ABA00
 static mut POWER_DRONE: Option<
     extern "C" fn(*mut ShipManager, *mut Drone, c_int, bool, bool) -> bool,
 > = None;
+// win: 4A08F0
 static mut DEPOWER_DRONE: Option<extern "C" fn(*mut ShipManager, *mut Drone, bool) -> bool> = None;
+// win: 49F010
 static mut POWER_WEAPON: Option<
     extern "C" fn(*mut ShipManager, *mut ProjectileFactory, bool, bool) -> bool,
 > = None;
+// win: 49F080
 static mut DEPOWER_WEAPON: Option<
     extern "C" fn(*mut ShipManager, *mut ProjectileFactory, bool) -> bool,
 > = None;
+// win: 470DA0
 static mut DOOR_CLOSE: Option<extern "C" fn(*mut Door)> = None;
+// win: 470E70
 static mut DOOR_OPEN: Option<extern "C" fn(*mut Door)> = None;
+// win: 4809B0
 static mut MOVE_CREW: Option<extern "C" fn(*mut CrewMember, c_int, c_int, bool) -> bool> = None;
+// win: 517680
 static mut SET_TAB: Option<extern "C" fn(*mut TabbedWindow, c_uint)> = None;
 
 unsafe fn hook(base: *mut c_void) {
