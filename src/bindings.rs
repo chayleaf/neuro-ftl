@@ -4608,6 +4608,7 @@ pub struct VtableCollideable {
     pub dtor: Option<fn(*mut Collideable)>,
     pub delete_dtor: Option<fn(*mut Collideable)>,
     pub collision_moving:
+        // this, start, finish, damage, raytrace
         Option<fn(*mut Collideable, Pointf, Pointf, Damage, bool) -> CollisionResponse>,
     pub damage_beam: Option<fn(*mut Collideable, Pointf, Pointf, Damage) -> bool>,
     pub damage_area: Option<fn(*mut Collideable, Pointf, Damage, bool) -> bool>,
@@ -4829,6 +4830,8 @@ pub struct CrewDrone {
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
 pub struct CollisionResponse {
+    // 1: hit (but don't damage anymore), 2: shield, 3: miss
+    // 0: proper hit (caller should also do some damage)
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
     pub collision_type: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x4)]
@@ -5550,6 +5553,7 @@ pub struct VtableRepairable {
     pub repair: Option<fn(*mut Repairable)>,
     pub partial_repair: Option<fn(*mut Repairable, c_float, bool) -> bool>,
     pub partial_damage: Option<fn(*mut Repairable, c_float) -> bool>,
+    // 10
     pub needs_repairing: Option<fn(*mut Repairable) -> bool>,
     pub functioning: Option<fn(*mut Repairable) -> bool>,
     pub can_be_sabotaged: Option<fn(*mut Repairable) -> bool>,
@@ -5560,16 +5564,19 @@ pub struct VtableRepairable {
     pub set_max_damage: Option<fn(*mut Repairable, c_float)>,
     pub set_location: Option<fn(*mut Repairable, Point)>,
     pub on_render_highlight: Option<fn(*mut Repairable)>,
+    // 20
     pub get_id: Option<fn(*mut Repairable) -> c_int>,
     pub is_room_based: Option<fn(*mut Repairable) -> bool>,
     pub get_room_id: Option<fn(*mut Repairable) -> c_int>,
     pub ioned: Option<fn(*mut Repairable, c_int) -> bool>,
+    // 24
     pub set_room_id: Option<fn(*mut Repairable)>,
 }
 
 #[vtable]
 pub struct VtableSpreadable {
     pub base: VtableRepairable,
+    // 25
     pub present: Option<fn(*mut Spreadable) -> bool>,
     pub update_death_timer: Option<fn(*mut Spreadable, c_int)>,
     pub update_start_timer: Option<fn(*mut Spreadable, c_int)>,

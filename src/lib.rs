@@ -265,6 +265,9 @@ unsafe fn hook(base: *mut c_void) {
 #[ctor]
 unsafe fn init() {
     env_logger::init();
+    // this the `konigsberg` code which contains a steam API shim so this can be used as a steam
+    // API wrapper
+    let _ = konigsberg::SteamAPI_SteamApps_v009;
     #[cfg(target_os = "linux")]
     {
         // on Linux, do LD_PRELOAD stuff

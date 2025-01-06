@@ -559,35 +559,49 @@ pub struct WeaponBlueprint {
     pub flavor_type: Option<TextString>,
     #[serde(default)]
     pub tip: Vec<TextString>,
+    // damage.i_damage
     pub damage: u32,
     pub missiles: Option<u32>,
+    // shots
     pub shots: Option<u32>,
+    // damage.i_shield_piercing
     pub sp: Option<u32>,
     #[serde(rename = "chargeLevels")]
     pub charge_levels: Option<u32>,
+    // damage.fire_chance
     #[serde(rename = "fireChance")]
     pub fire_chance: u32,
+    // damage.breach_chance
     #[serde(rename = "breachChance")]
     pub breach_chance: u32,
+    // cooldown
     pub cooldown: Option<f64>,
     pub power: Option<u32>,
     pub cost: Option<u32>,
+    // color
     pub color: Option<Rgb>,
     pub bp: Option<u32>,
     pub rarity: u32,
+    // damage.i_ion_damage
     pub ion: Option<u32>,
+    // damage.b_hull_buster
     #[serde(rename = "hullBust")]
     pub hull_bust: Option<bool>,
+    // damage.i_pers_damage
     #[serde(rename = "persDamage")]
     pub pers_damage: Option<i32>,
+    // damage.b_lockdown
     pub lockdown: Option<bool>,
+    // damage.i_system_damage
     #[serde(rename = "sysDamage")]
     pub sys_damage: Option<i32>,
     pub speed: Option<u32>,
+    // damage.stun_chance
     #[serde(rename = "stunChance")]
     pub stun_chance: Option<u32>,
     #[serde(rename = "iconImage")]
     pub icon_image: Option<String>,
+    // length
     pub length: Option<u32>,
     pub image: Option<String>,
     #[serde(rename = "launchSounds")]
@@ -606,6 +620,7 @@ pub struct WeaponBlueprint {
     #[serde(default)]
     pub drone_targetable: Vec<bool>,
     pub radius: Option<u32>,
+    // damage.i_stun
     pub stun: Option<u32>,
     pub boost: Option<Boost>,
     pub spin: Option<u32>,
@@ -947,13 +962,21 @@ pub enum WeaponType {
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DroneType {
+    // shoots down incoming projectiles
     Defense = 0,
+    // attacks the enemy ship
     Combat = 1,
+    // crew member, repairs
     Repair = 2,
+    // crew member, kills
     Battle = 3,
+    // no teleporter needed, breaches through
     Boarder = 4,
+    // repairs hull and dies via SetDestroyed
     ShipRepair = 5,
+    // internal
     Hacking = 6,
+    // supershield
     Shield = 7,
 }
 
