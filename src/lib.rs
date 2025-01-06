@@ -15,6 +15,7 @@ use retour::GenericDetour;
 pub mod bindings;
 pub mod cross;
 pub mod game;
+mod logger;
 pub mod pak;
 pub mod xml;
 
@@ -262,9 +263,12 @@ unsafe fn hook(base: *mut c_void) {
     });
 }
 
+static LOGGER: OnceLock<logger::Logger> = OnceLock::new();
+
 #[ctor]
 unsafe fn init() {
-    env_logger::init();
+    let logger = LOGGER.get_or_init(logger::Logger::new);
+    log::set_logger(logger).unwrap();
     // this the `konigsberg` code which contains a steam API shim so this can be used as a steam
     // API wrapper
     let _ = konigsberg::SteamAPI_SteamApps_v009;
