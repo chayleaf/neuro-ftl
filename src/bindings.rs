@@ -1,16 +1,19 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 use std::{
     borrow::Cow,
+    cmp::Ordering,
+    collections::HashMap,
     ffi::{c_char, c_double, c_float, c_int, c_uint, CStr},
     fmt,
     marker::PhantomData,
     mem,
-    ops::Range,
-    ops::{Deref, DerefMut},
+    ops::{Deref, DerefMut, Range},
     ptr,
 };
 
 use neuro_ftl_derive::{vtable, TestOffsets};
+
+use crate::game::actions::Direction;
 
 // 0 1 5 13 2 3 4 6 7 8 9 10 11 12 14 15 - systems
 // 6 7 8 12 - subsystems
@@ -432,49 +435,49 @@ pub struct ShipBuilder {
     pub name_box_primitive: *mut GL_Primitive,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x10)]
     pub enable_advanced_primitive: *mut GL_Primitive,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0xC)]
+    #[cfg_attr(target_os = "windows", test_offset = 0xC)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x18)]
     pub reset_button: Button,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x78)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x78)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0xa8)]
     pub clear_button: Button,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0xE4)]
+    #[cfg_attr(target_os = "windows", test_offset = 0xE4)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x138)]
     pub start_button: TextButton,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x1D4)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x1D4)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x238)]
     pub back_button: TextButton,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x2C4)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x2C4)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x338)]
     pub rename_button: TextButton,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x3B4)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x3B4)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x438)]
     pub left_button: Button,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x420)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x420)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x4c8)]
     pub right_button: Button,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x48C)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x48C)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x558)]
     pub list_button: TextButton,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x57C)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x57C)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x658)]
     pub show_button: TextButton,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x66C)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x66C)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x758)]
     pub easy_button: TextButton,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x75C)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x75C)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x858)]
     pub normal_button: TextButton,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x84C)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x84C)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x958)]
     pub hard_button: TextButton,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x93C)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x93C)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0xa58)]
     pub type_a: TextButton,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0xA2C)]
+    #[cfg_attr(target_os = "windows", test_offset = 0xA2C)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0xb58)]
     pub type_b: TextButton,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0xB1C)]
+    #[cfg_attr(target_os = "windows", test_offset = 0xB1C)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0xc58)]
     pub type_c: TextButton,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0xd58)]
@@ -483,22 +486,22 @@ pub struct ShipBuilder {
     pub type_b_loc: Point,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0xd68)]
     pub type_c_loc: Point,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0xC24)]
+    #[cfg_attr(target_os = "windows", test_offset = 0xC24)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0xd70)]
     pub random_button: TextButton,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0xD14)]
+    #[cfg_attr(target_os = "windows", test_offset = 0xD14)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0xe70)]
     pub advanced_off_button: TextButton,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0xE04)]
+    #[cfg_attr(target_os = "windows", test_offset = 0xE04)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0xf70)]
     pub advanced_on_button: TextButton,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0xEF4)]
+    #[cfg_attr(target_os = "windows", test_offset = 0xEF4)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x1070)]
     pub buttons: Vector<*mut GenericButton>,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0xF00)]
+    #[cfg_attr(target_os = "windows", test_offset = 0xF00)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x1088)]
     pub animations: Vector<Animation>,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0xF0C)]
+    #[cfg_attr(target_os = "windows", test_offset = 0xF0C)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x10a0)]
     pub v_crew_boxes: Vector<*mut CrewCustomizeBox>,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x10b8)]
@@ -525,7 +528,7 @@ pub struct ShipBuilder {
     pub ship_ach_padding: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x1100)]
     pub advanced_title_offset: c_int,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0xF48)]
+    #[cfg_attr(target_os = "windows", test_offset = 0xF48)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x1108)]
     pub v_equipment_boxes: Vector<*mut EquipmentBox>,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x1120)]
@@ -585,7 +588,7 @@ pub struct ShipBuilder {
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x1e18)]
     pub arrow: *mut GL_Texture,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x1e20)]
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x1C80)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x1C80)]
     pub desc_box: *mut WindowFrame,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x1e28)]
     pub tracker: AnimationTracker,
@@ -607,77 +610,77 @@ pub struct MainMenu {
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x18)]
     pub glow_tracker: AnimationTracker,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x38)]
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x2C)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x2C)]
     pub continue_button: Button,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x98)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x98)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0xc8)]
     pub start_button: Button,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x104)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x104)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x158)]
     pub help_button: Button,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x170)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x170)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x1e8)]
     pub stat_button: Button,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x1DC)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x1DC)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x278)]
     pub options_button: Button,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x248)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x248)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x308)]
     pub credits_button: Button,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x2B4)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x2B4)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x398)]
     pub quit_button: Button,
-    #[cfg(not(target_pointer_width = "64"))]
+    #[cfg(target_os = "windows")]
     pub itb_button_active: bool,
-    #[cfg(not(target_pointer_width = "64"))]
+    #[cfg(target_os = "windows")]
     #[test_offset = 0x324]
     pub itb_button: Button,
-    #[cfg(not(target_pointer_width = "64"))]
+    #[cfg(target_os = "windows")]
     pub itb_anim: *mut Animation,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x394)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x394)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x428)]
     pub buttons: Vector<*mut Button>,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x440)]
     pub final_choice: c_int,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x3A4)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x3A4)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x448)]
     pub ship_builder: ShipBuilder,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x2298)]
     pub b_score_screen: bool,
     // TODO:
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x204C)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x204C)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x22a0)]
     pub option_screen: OptionsScreen,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x33a0)]
     pub b_select_save: bool,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x3054)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x3054)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x33a8)]
     pub confirm_new_game: ConfirmWindow,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x32C0)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x32C0)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x3628)]
     pub changelog: ChoiceBox,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x3840)]
     pub b_credit_screen: bool,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x3508)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x3508)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x3848)]
     pub credits: CreditScreen,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x38a0)]
     pub b_changed_login: bool,
-    #[cfg(not(target_pointer_width = "64"))]
+    #[cfg(target_os = "windows")]
     pub _unk1: c_int,
-    #[cfg(not(target_pointer_width = "64"))]
+    #[cfg(target_os = "windows")]
     pub _unk2: c_int,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x3574)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x3574)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x38a8)]
     pub test_crew: Vector<*mut CrewMember>,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x38c0)]
     pub b_changed_screen: bool,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x38c1)]
     pub b_sync_screen: bool,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x3584)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x3584)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x38c8)]
     pub error: StdString,
-    #[cfg(not(target_pointer_width = "64"))]
+    #[cfg(target_os = "windows")]
     pub _unk3: c_char,
 }
 
@@ -765,9 +768,9 @@ pub struct CApp {
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x18)]
     pub world: *mut WorldManager,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x20)]
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x10)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x10)]
     pub menu: MainMenu,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x35B0)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x35B0)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x38f0)]
     pub lang_chooser: LanguageChooser,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x3930)]
@@ -822,12 +825,12 @@ pub struct CApp {
     pub native_full_screen_error: bool,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x3979)]
     pub fb_stretch_error: bool,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x3620)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x3620)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x3980)]
     pub last_language: StdString,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x3988)]
     pub input_focus: bool,
-    #[cfg(not(target_pointer_width = "64"))]
+    #[cfg(target_os = "windows")]
     pub use_direct3d: bool,
 }
 
@@ -981,7 +984,7 @@ pub struct Queue<T> {
 
 #[repr(C)]
 #[derive(Debug)]
-#[cfg(target_pointer_width = "64")]
+#[cfg(target_os = "linux")]
 pub struct StdString {
     pub data: *const c_char,
 }
@@ -997,7 +1000,7 @@ impl StdString {
 
 #[repr(C)]
 #[derive(Debug)]
-#[cfg(not(target_pointer_width = "64"))]
+#[cfg(target_os = "windows")]
 pub struct StdString {
     // if it equals &res, stack allocation
     // if it's anything else, heap allocation
@@ -1091,13 +1094,13 @@ pub struct GenericButton {
 pub struct TextButton {
     pub base: GenericButton,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x50)]
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x48)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x48)]
     pub primitives: [*mut GL_Primitive; 3],
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x68)]
     pub base_image: *mut GL_Texture,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x70)]
     pub base_image_offset: Point,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x60)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x60)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x78)]
     pub base_primitive: *mut GL_Primitive,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x80)]
@@ -1118,7 +1121,7 @@ pub struct TextButton {
     pub auto_width_min: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0xdc)]
     pub auto_right_align: bool,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0xC4)]
+    #[cfg_attr(target_os = "windows", test_offset = 0xC4)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0xe0)]
     pub label: TextString,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0xf0)]
@@ -1347,13 +1350,13 @@ pub struct CompleteShip {
     pub enemy_ship: *mut CompleteShip,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x28)]
     pub b_player_ship: bool,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 24)]
+    #[cfg_attr(target_os = "windows", test_offset = 24)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x30)]
     pub ship_ai: ShipAI,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x118)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x118)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x1e0)]
     pub arriving_party: Vector<*mut CrewMember>,
-    #[cfg_attr(not(target_pointer_width = "64"), test_offset = 0x124)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x124)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x1f8)]
     pub leaving_party: Vector<*mut CrewMember>,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x210)]
@@ -2247,6 +2250,38 @@ pub struct Location {
     pub space_image: StdString,
 }
 
+impl Location {
+    pub fn neighbors(&self) -> HashMap<Direction, *mut Self> {
+        let mut ret = HashMap::new();
+        let x0 = (self.loc.x as u64) / 110;
+        let y0 = (self.loc.y as u64) / 110;
+        for l in self.connected_locations.iter().copied() {
+            if l.is_null() {
+                continue;
+            }
+            let loc = unsafe { &*l };
+            let x1 = (loc.loc.x as u64) / 110;
+            let y1 = (loc.loc.y as u64) / 110;
+            let dir = match (x1.cmp(&x0), y1.cmp(&y0)) {
+                (Ordering::Less, Ordering::Less) => Direction::TopLeft,
+                (Ordering::Less, Ordering::Equal) => Direction::Left,
+                (Ordering::Less, Ordering::Greater) => Direction::BottomLeft,
+                (Ordering::Equal, Ordering::Less) => Direction::Top,
+                (Ordering::Equal, Ordering::Equal) => {
+                    log::error!("graph loop found, this shouldn't happen");
+                    continue;
+                }
+                (Ordering::Equal, Ordering::Greater) => Direction::Bottom,
+                (Ordering::Greater, Ordering::Less) => Direction::TopRight,
+                (Ordering::Greater, Ordering::Equal) => Direction::Right,
+                (Ordering::Greater, Ordering::Greater) => Direction::BottomRight,
+            };
+            ret.insert(dir, l);
+        }
+        ret
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
 pub struct AugmentEquipBox {
@@ -2602,7 +2637,7 @@ pub struct ReactorButton {
 }
 
 pub unsafe fn power_manager(ship_id: i32) -> Option<&'static PowerManager> {
-    (*super::POWER_MANAGERS).get(ship_id as usize)
+    (*super::POWER_MANAGERS.0).get(ship_id as usize)
 }
 
 impl ReactorButton {
@@ -2733,7 +2768,7 @@ impl TabbedWindow {
     }
     pub unsafe fn set_tab(&mut self, tab: c_uint) {
         unsafe {
-            (super::SET_TAB.unwrap())(ptr::addr_of_mut!(*self), tab);
+            super::SET_TAB.call(ptr::addr_of_mut!(*self), tab);
         }
     }
 }
@@ -3214,6 +3249,38 @@ pub struct Sector {
     pub level: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x30)]
     pub description: SectorDescription,
+}
+
+impl Sector {
+    pub fn neighbors(&self) -> HashMap<Direction, *mut Self> {
+        let mut ret = HashMap::new();
+        let x0 = self.location.x;
+        let y0 = self.location.y;
+        for s in self.neighbors.iter().copied() {
+            if s.is_null() {
+                continue;
+            }
+            let sec = unsafe { &*s };
+            let x1 = sec.location.x;
+            let y1 = sec.location.y;
+            let dir = match (x1.cmp(&x0), y1.cmp(&y0)) {
+                (Ordering::Less, Ordering::Less) => continue, // Direction::TopLeft,
+                (Ordering::Less, Ordering::Equal) => continue, // Direction::Left,
+                (Ordering::Less, Ordering::Greater) => continue, // Direction::BottomLeft,
+                (Ordering::Equal, Ordering::Less) => Direction::Top,
+                (Ordering::Equal, Ordering::Equal) => {
+                    log::error!("graph loop found, this shouldn't happen");
+                    continue;
+                }
+                (Ordering::Equal, Ordering::Greater) => Direction::Bottom,
+                (Ordering::Greater, Ordering::Less) => Direction::TopRight,
+                (Ordering::Greater, Ordering::Equal) => Direction::Right,
+                (Ordering::Greater, Ordering::Greater) => Direction::BottomRight,
+            };
+            ret.insert(dir, s);
+        }
+        ret
+    }
 }
 
 #[repr(C)]
@@ -4401,7 +4468,7 @@ pub struct CrewControl {
     pub selecting_crew: bool,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0xa1)]
     pub selecting_crew_on_player_ship: bool,
-    #[cfg(not(target_pointer_width = "64"))]
+    #[cfg(target_os = "windows")]
     pub _unk1: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0xa8)]
     pub selecting_crew_start_time: c_double,
@@ -4429,7 +4496,7 @@ pub struct CrewControl {
     pub return_stations_base: *mut GL_Primitive,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x220)]
     pub stations_last_y: c_int,
-    #[cfg(not(target_pointer_width = "64"))]
+    #[cfg(target_os = "windows")]
     pub _unk2: c_int,
 }
 
@@ -4656,27 +4723,13 @@ pub struct ParticleEmitter {
 // XXX: maps are really annoying to go through so not gonna bother recreating this
 #[repr(C)]
 #[derive(Debug)]
-#[cfg(target_pointer_width = "64")]
 pub struct Map<K, V> {
-    pub a0: u64,
-    pub a1: u64,
-    pub a2: u64,
-    pub a3: u64,
-    pub a4: u64,
-    pub a5: u64,
-    pub ph: PhantomData<(K, V)>,
-}
-
-#[repr(C)]
-#[derive(Debug)]
-#[cfg(not(target_pointer_width = "64"))]
-pub struct Map<K, V> {
-    pub a0: u32,
-    pub a1: u32,
-    pub a2: u32,
-    pub a3: u32,
-    pub a4: u32,
-    pub a5: u32,
+    pub a0: usize,
+    pub a1: usize,
+    pub a2: usize,
+    pub a3: usize,
+    pub a4: usize,
+    pub a5: usize,
     pub ph: PhantomData<(K, V)>,
 }
 
@@ -5773,10 +5826,10 @@ pub struct Door {
 
 impl Door {
     pub fn close(&mut self) {
-        unsafe { (super::DOOR_CLOSE.unwrap())(ptr::addr_of_mut!(*self)) }
+        unsafe { super::DOOR_CLOSE.call(ptr::addr_of_mut!(*self)) }
     }
     pub fn open(&mut self) {
-        unsafe { (super::DOOR_OPEN.unwrap())(ptr::addr_of_mut!(*self)) }
+        unsafe { super::DOOR_OPEN.call(ptr::addr_of_mut!(*self)) }
     }
 }
 
@@ -6093,7 +6146,7 @@ impl CrewMember {
         }
     }
     pub fn move_to_room(&mut self, room_id: c_int, slot_id: c_int, force: bool) -> bool {
-        unsafe { (super::MOVE_CREW.unwrap())(ptr::addr_of_mut!(*self), room_id, slot_id, force) }
+        unsafe { super::MOVE_CREW.call(ptr::addr_of_mut!(*self), room_id, slot_id, force) }
     }
 }
 
@@ -6148,6 +6201,92 @@ pub struct DroneSystem {
     pub i_starting_battery_power: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x2a0)]
     pub repower_list: VectorBool,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct HotkeyDesc {
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
+    pub name: StdString,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x8)]
+    pub key: SDLKey,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct Array<T, const N: usize> {
+    pub data: [T; N],
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct SettingValues {
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
+    pub fullscreen: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x4)]
+    pub current_fullscreen: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x8)]
+    pub last_fullscreen: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xc)]
+    pub sound: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x10)]
+    pub music: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x14)]
+    pub difficulty: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x18)]
+    pub command_console: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x19)]
+    pub alt_pause: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1a)]
+    pub touch_auto_pause: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1b)]
+    pub lowend: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1c)]
+    pub fb_error: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x20)]
+    pub language: StdString,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x28)]
+    pub language_set: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x2c)]
+    pub screen_resolution: Point,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x34)]
+    pub dialog_keys: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x38)]
+    pub logging: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x39)]
+    pub b_show_changelog: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x3a)]
+    pub b_show_sync_achievements: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x3c)]
+    pub loading_save_version: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x40)]
+    pub ach_popups: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x41)]
+    pub vsync: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x42)]
+    pub frame_limit: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x43)]
+    pub manual_resolution: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x44)]
+    pub manual_windowed: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x45)]
+    pub manual_stretched: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x46)]
+    pub show_paths: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x47)]
+    pub swap_texture_type: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x48)]
+    pub colorblind: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x50)]
+    pub hotkeys: Array<Vector<HotkeyDesc>, 4>,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xb0)]
+    pub holding_modifier: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xb1)]
+    pub b_dlc_enabled: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xb4)]
+    pub opened_list: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xb8)]
+    pub beam_tutorial: bool,
 }
 
 #[repr(C)]
@@ -7269,13 +7408,7 @@ impl ShipManager {
         force: bool,
     ) -> bool {
         unsafe {
-            (super::POWER_DRONE.unwrap())(
-                ptr::addr_of_mut!(*self),
-                drone,
-                room_id,
-                user_driven,
-                force,
-            )
+            super::POWER_DRONE.call(ptr::addr_of_mut!(*self), drone, room_id, user_driven, force)
         }
     }
     pub fn power_weapon(
@@ -7284,15 +7417,13 @@ impl ShipManager {
         user_driven: bool,
         force: bool,
     ) -> bool {
-        unsafe {
-            (super::POWER_WEAPON.unwrap())(ptr::addr_of_mut!(*self), weapon, user_driven, force)
-        }
+        unsafe { super::POWER_WEAPON.call(ptr::addr_of_mut!(*self), weapon, user_driven, force) }
     }
     pub fn depower_drone(&mut self, drone: *mut Drone, user_driven: bool) -> bool {
-        unsafe { (super::DEPOWER_DRONE.unwrap())(ptr::addr_of_mut!(*self), drone, user_driven) }
+        unsafe { super::DEPOWER_DRONE.call(ptr::addr_of_mut!(*self), drone, user_driven) }
     }
     pub fn depower_weapon(&mut self, weapon: *mut ProjectileFactory, user_driven: bool) -> bool {
-        unsafe { (super::DEPOWER_WEAPON.unwrap())(ptr::addr_of_mut!(*self), weapon, user_driven) }
+        unsafe { super::DEPOWER_WEAPON.call(ptr::addr_of_mut!(*self), weapon, user_driven) }
     }
     pub fn has_system(&self, system: System) -> bool {
         match system {

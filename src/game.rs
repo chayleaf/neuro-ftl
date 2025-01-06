@@ -1,6 +1,5 @@
 use std::{
     borrow::Cow,
-    cmp::Ordering,
     collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet},
     ffi::c_int,
     ops::DerefMut,
@@ -9,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use actions::{Direction, FtlActions, InventorySlotType, TargetShip};
+use actions::{FtlActions, InventorySlotType, TargetShip};
 use futures_util::{SinkExt, StreamExt};
 use indexmap::IndexMap;
 use neuro_sama::game::{Action, ApiMut};
@@ -19,7 +18,7 @@ use tokio::sync::mpsc;
 
 use crate::bindings::{self, power_manager, CApp, ConfirmWindow, Door, StoreType, System};
 
-mod actions;
+pub mod actions;
 // mod context;
 
 fn meta<T: Action>() -> neuro_sama::schema::Action {
@@ -1779,29 +1778,7 @@ impl neuro_sama::game::GameMut for State {
                 } else {
                     let s = &mut *(*(*app).gui).star_map;
                     let loc = &*s.current_loc;
-                    let mut locs = HashMap::new();
-                    let x0 = (loc.loc.x as u64) / 110;
-                    let y0 = (loc.loc.y as u64) / 110;
-                    for l in loc.connected_locations.iter().copied() {
-                        let loc = &*l;
-                        let x1 = (loc.loc.x as u64) / 110;
-                        let y1 = (loc.loc.y as u64) / 110;
-                        let dir = match (x1.cmp(&x0), y1.cmp(&y0)) {
-                            (Ordering::Less, Ordering::Less) => Direction::TopLeft,
-                            (Ordering::Less, Ordering::Equal) => Direction::Left,
-                            (Ordering::Less, Ordering::Greater) => Direction::BottomLeft,
-                            (Ordering::Equal, Ordering::Less) => Direction::Top,
-                            (Ordering::Equal, Ordering::Equal) => {
-                                log::error!("graph loop found, this shouldn't happen");
-                                continue;
-                            }
-                            (Ordering::Equal, Ordering::Greater) => Direction::Bottom,
-                            (Ordering::Greater, Ordering::Less) => Direction::TopRight,
-                            (Ordering::Greater, Ordering::Equal) => Direction::Right,
-                            (Ordering::Greater, Ordering::Greater) => Direction::BottomRight,
-                        };
-                        locs.insert(dir, l);
-                    }
+                    let locs = loc.neighbors();
                     if let Some(path) = locs.get(&event.direction) {
                         s.potential_loc = *path;
                         s.ready_to_travel = true;
@@ -1899,29 +1876,7 @@ impl neuro_sama::game::GameMut for State {
                 } else {
                     let s = &mut *(*(*app).gui).star_map;
                     let sec = &*s.current_sector;
-                    let mut secs = HashMap::new();
-                    let x0 = sec.location.x;
-                    let y0 = sec.location.y;
-                    for s in sec.neighbors.iter().copied() {
-                        let sec = &*s;
-                        let x1 = sec.location.x;
-                        let y1 = sec.location.y;
-                        let dir = match (x1.cmp(&x0), y1.cmp(&y0)) {
-                            (Ordering::Less, Ordering::Less) => Direction::TopLeft,
-                            (Ordering::Less, Ordering::Equal) => Direction::Left,
-                            (Ordering::Less, Ordering::Greater) => Direction::BottomLeft,
-                            (Ordering::Equal, Ordering::Less) => Direction::Top,
-                            (Ordering::Equal, Ordering::Equal) => {
-                                log::error!("graph loop found, this shouldn't happen");
-                                continue;
-                            }
-                            (Ordering::Equal, Ordering::Greater) => Direction::Bottom,
-                            (Ordering::Greater, Ordering::Less) => Direction::TopRight,
-                            (Ordering::Greater, Ordering::Equal) => Direction::Right,
-                            (Ordering::Greater, Ordering::Greater) => Direction::BottomRight,
-                        };
-                        secs.insert(dir, s);
-                    }
+                    let secs = sec.neighbors();
                     if let Some(path) = secs.get(&event.direction) {
                         s.final_sector_choice = s
                             .sectors
@@ -2320,8 +2275,7 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
         }
         if (*app).menu.ship_builder.b_open {
             let s = &(*app).menu.ship_builder;
-            // TODO: start game actions, difficulty selection actions, enable advanced edition
-            // action
+            // TODO: (?) difficulty selection actions, enable advanced edition action
             ret.add::<actions::RenameCrew>();
             let mut meta = meta::<actions::RenameCrew>();
             match meta
@@ -2348,7 +2302,6 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
             return ret;
         }
         if (*app).menu.b_select_save {
-            // TODO: select save
             if (*app).menu.confirm_new_game.base.b_open {
                 if (*app).menu.confirm_new_game.yes_button.base.b_active {
                     ret.add::<actions::Confirm>();
@@ -2409,11 +2362,54 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
     }
     if (*(*gui).star_map).base.b_open {
         ret.add::<actions::Back>();
-        // TODO:
-        // ret.add::<actions::NextSector>();
-        // ret.add::<actions::ChooseNextSector>();
-        // ret.add::<actions::Wait>();
-        // ret.add::<actions::Jump>();
+        let s = &*(*gui).star_map;
+        if s.current_loc.is_null() {
+            return ret;
+        }
+        if s.b_choosing_new_sector {
+            let sec = &*s.current_sector;
+            let secs: HashSet<_> = sec.neighbors().into_keys().map(|x| x.to_str()).collect();
+            let mut meta = meta::<actions::ChooseNextSector>();
+            match meta
+                .schema
+                .schema
+                .object()
+                .properties
+                .get_mut("direction")
+                .unwrap()
+            {
+                schemars::schema::Schema::Object(x) => {
+                    x.enum_values
+                        .as_mut()
+                        .unwrap()
+                        .retain(|x| secs.contains(x.as_str().unwrap()));
+                }
+                _ => panic!(),
+            }
+            ret.actions.insert(actions::ChooseNextSector::name(), meta);
+        } else {
+            let loc = &*s.current_loc;
+            let locs: HashSet<_> = loc.neighbors().into_keys().map(|x| x.to_str()).collect();
+            let mut meta = meta::<actions::Jump>();
+            match meta
+                .schema
+                .schema
+                .object()
+                .properties
+                .get_mut("direction")
+                .unwrap()
+            {
+                schemars::schema::Schema::Object(x) => {
+                    x.enum_values
+                        .as_mut()
+                        .unwrap()
+                        .retain(|x| locs.contains(x.as_str().unwrap()));
+                }
+                _ => panic!(),
+            }
+            ret.actions.insert(actions::Jump::name(), meta);
+        }
+        ret.add::<actions::Wait>();
         return ret;
     }
     if (*gui).choice_box.base.b_open {
@@ -2471,26 +2467,57 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
                 ret.add::<actions::SwitchStorePage>();
             }
             ret.add::<actions::SellScreen>();
-            let boxes = store.active_boxes::<bindings::AugmentStoreBox>();
-            if !boxes.is_empty() {
-                ret.add::<actions::BuyAugmentation>();
+            fn meta_for<T: bindings::StoreBoxTrait, Y: Action>(
+                ret: &mut ActionDb,
+                store: &bindings::Store,
+            ) {
+                let mut meta = meta::<Y>();
+                let boxes = store.active_boxes::<T>();
+                if boxes.is_empty() {
+                    return;
+                }
+                if let Some(schemars::schema::Schema::Object(x)) =
+                    meta.schema.schema.object().properties.get_mut("index")
+                {
+                    x.number.as_mut().unwrap().minimum = Some(0.0);
+                    x.number.as_mut().unwrap().maximum = Some(boxes.len() as f64 - 1.0);
+                } else if let Some(schemars::schema::Schema::Object(x)) =
+                    meta.schema.schema.object().properties.get_mut("item")
+                {
+                    let items: HashSet<_> = boxes
+                        .iter()
+                        .map(|x| x.cast::<bindings::ItemStoreBox>())
+                        .map(|x| unsafe { (*(*x).blueprint).base.name.to_str() })
+                        .collect();
+                    x.enum_values
+                        .as_mut()
+                        .unwrap()
+                        .retain(|x| items.contains(x.as_str().unwrap()));
+                } else if let Some(schemars::schema::Schema::Object(x)) =
+                    meta.schema.schema.object().properties.get_mut("system")
+                {
+                    let systems: HashSet<_> = boxes
+                        .iter()
+                        .map(|x| x.cast::<bindings::SystemStoreBox>())
+                        .map(|x| unsafe {
+                            System::from_id((*x).type_)
+                                .map(|x| x.to_string())
+                                .unwrap_or_default()
+                        })
+                        .collect();
+                    x.enum_values
+                        .as_mut()
+                        .unwrap()
+                        .retain(|x| systems.contains(x.as_str().unwrap()));
+                } else {
+                    panic!()
+                }
+                ret.actions.insert(Y::name(), meta);
             }
-            let boxes = store.active_boxes::<bindings::DroneStoreBox>();
-            if !boxes.is_empty() {
-                ret.add::<actions::BuyDrone>();
-            }
-            let boxes = store.active_boxes::<bindings::SystemStoreBox>();
-            if !boxes.is_empty() {
-                ret.add::<actions::BuySystem>();
-            }
-            let boxes = store.active_boxes::<bindings::WeaponStoreBox>();
-            if !boxes.is_empty() {
-                ret.add::<actions::BuyWeapon>();
-            }
-            let boxes = store.active_boxes::<bindings::ItemStoreBox>();
-            if !boxes.is_empty() {
-                ret.add::<actions::BuyConsumable>();
-            }
+            meta_for::<bindings::AugmentStoreBox, actions::BuyAugmentation>(&mut ret, store);
+            meta_for::<bindings::SystemStoreBox, actions::BuySystem>(&mut ret, store);
+            meta_for::<bindings::WeaponStoreBox, actions::BuyWeapon>(&mut ret, store);
+            meta_for::<bindings::ItemStoreBox, actions::BuyConsumable>(&mut ret, store);
             let boxes = store.active_boxes::<bindings::RepairStoreBox>();
             if !boxes.is_empty() {
                 ret.add::<actions::Repair1>();
@@ -2779,7 +2806,7 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
 
 pub unsafe extern "C" fn loop_hook(app: *mut CApp) {
     // activated with `l`, very useful for testing
-    *super::CHEATS = 1;
+    (*super::SETTING_VALUES.0).command_console = true;
     GAME.get_or_init(|| {
         let (game2ws_tx, mut game2ws_rx) = mpsc::channel(128);
         let (ws2game_tx, ws2game_rx) = mpsc::channel(128);

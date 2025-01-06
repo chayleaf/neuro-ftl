@@ -2,15 +2,18 @@
 use std::{
     collections::HashMap,
     ffi::{c_int, c_uint, c_void, CStr},
-    mem, ptr,
+    ptr,
     sync::OnceLock,
 };
 
-use bindings::{CApp, CrewMember, Door, Drone, ProjectileFactory, ShipManager, TabbedWindow};
+use bindings::{
+    CApp, CrewMember, Door, Drone, ProjectileFactory, SettingValues, ShipManager, TabbedWindow,
+};
 use ctor::ctor;
 use retour::GenericDetour;
 
 pub mod bindings;
+pub mod cross;
 pub mod game;
 pub mod pak;
 pub mod xml;
@@ -132,128 +135,115 @@ fn library() -> &'static TextLibrary {
 
 static TEXT: OnceLock<TextLibrary> = OnceLock::new();
 
-//fn
+// win: 916D20
+static mut SETTING_VALUES: cross::Ptr<0x916D20, 0xA434C0, SettingValues> = cross::Ptr::new();
 
-// hook input_update
+// win: 91AB20
+static mut POWER_MANAGERS: cross::Ptr<
+    0x91AB20,
+    0xA47C70,
+    bindings::Vector<bindings::PowerManager>,
+> = cross::Ptr::new();
 
-/*
+// static mut SHIP_GRAPHS: *mut bindings::Vector<bindings::ShipGraph> = ptr::null_mut();
 
-CApp
-langChooser.bOpen -> we're in the lang chooser
-!gameLogic -> can't do shit besides the lang chooser
-menu.bOpen -> in main menu
-menu.finalChoice
-    2 => exit
-    9 => continue (if save exists)
-    1 => new game
-    anything else => new game without tutorial?
-
-menu.bCreditScreen => credits open
-menu.bSelectSave => menu.confirmNewGame
-menu.changelog.bOpen => menu.changelog
-menu.optionScreen.bOpen => menu.optionScreen
-menu.shipBuilder.bOpen => menu.shipBuilder
-menu.bScoreScreen => ScoreKeeper::Keeper
-
-continueButton.bActive => can continue
-startButton helpButton statButton optionsButton creditsButton quitButton
-
-otherwise, CommandGui
-gui->bPaused || gui->menu_pause is IsPaused
-0 => RESTART_EASY
-1 => RESTART_TUTORIAL
-2 => QUIT
-// 3 => OPTIONS
-// 4 => CONTINUE
-5 => MAIN_MENU
-6 => HANGAR
-// 7 => STATS
-8 => SAVE_QUIT
-// 9 => LOAD_GAME
-// 10 => CONTROLS
-
- */
-
-static mut GEN_INPUT_EVENTS: OnceLock<GenericDetour<unsafe extern "C" fn(*mut CApp)>> =
-    OnceLock::new();
-
-/*static mut POPULATE_GRID: OnceLock<GenericDetour<unsafe extern "C" fn(*mut StarMap, Point)>> =
-OnceLock::new();*/
-
-/*static mut RANDOM: OnceLock<GenericDetour<unsafe extern "C" fn() -> gg>> =
-OnceLock::new();*/
-
-pub unsafe extern "C" fn gen_input_events_hook(app: *mut CApp) {
-    GEN_INPUT_EVENTS.get().unwrap_unchecked().call(app);
-    game::loop_hook(app);
-}
-
-/*pub unsafe extern "C" fn populate_grid_hook(star_map: *mut StarMap, point: Point) {
-    GEN_INPUT_EVENTS.get().unwrap_unchecked().call(app);
-    game::loop_hook(app);
-}*/
-
-static mut CHEATS: *mut u8 = ptr::null_mut();
-
-static mut POWER_MANAGERS: *mut bindings::Vector<bindings::PowerManager> = ptr::null_mut();
-
-static mut SHIP_GRAPHS: *mut bindings::Vector<bindings::ShipGraph> = ptr::null_mut();
-
-// win: 4ABA00
-static mut POWER_DRONE: Option<
-    extern "C" fn(*mut ShipManager, *mut Drone, c_int, bool, bool) -> bool,
-> = None;
-// win: 4A08F0
-static mut DEPOWER_DRONE: Option<extern "C" fn(*mut ShipManager, *mut Drone, bool) -> bool> = None;
-// win: 49F010
-static mut POWER_WEAPON: Option<
-    extern "C" fn(*mut ShipManager, *mut ProjectileFactory, bool, bool) -> bool,
-> = None;
+static mut POWER_DRONE: cross::Fn5<
+    0x4ABA00,
+    0x4C78B0,
+    *mut ShipManager,
+    *mut Drone,
+    c_int,
+    bool,
+    bool,
+    bool,
+> = cross::Fn5::new();
+// win:
+static mut DEPOWER_DRONE: cross::Fn3<0x4A08F0, 0x4BC5E0, *mut ShipManager, *mut Drone, bool, bool> =
+    cross::Fn3::new();
+// win:
+static mut POWER_WEAPON: cross::Fn4<
+    0x49F010,
+    0x4BB730,
+    *mut ShipManager,
+    *mut ProjectileFactory,
+    bool,
+    bool,
+    bool,
+> = cross::Fn4::new();
 // win: 49F080
-static mut DEPOWER_WEAPON: Option<
-    extern "C" fn(*mut ShipManager, *mut ProjectileFactory, bool) -> bool,
-> = None;
+static mut DEPOWER_WEAPON: cross::Fn3<
+    0x49F080,
+    0x4BB770,
+    *mut ShipManager,
+    *mut ProjectileFactory,
+    bool,
+    bool,
+> = cross::Fn3::new();
 // win: 470DA0
-static mut DOOR_CLOSE: Option<extern "C" fn(*mut Door)> = None;
+static mut DOOR_CLOSE: cross::Fn1<0x470DA0, 0x498BB0, *mut Door, ()> = cross::Fn1::new();
 // win: 470E70
-static mut DOOR_OPEN: Option<extern "C" fn(*mut Door)> = None;
+static mut DOOR_OPEN: cross::Fn1<0x470E70, 0x498C70, *mut Door, ()> = cross::Fn1::new();
 // win: 4809B0
-static mut MOVE_CREW: Option<extern "C" fn(*mut CrewMember, c_int, c_int, bool) -> bool> = None;
+static mut MOVE_CREW: cross::Fn4<0x4809B0, 0x4855E0, *mut CrewMember, c_int, c_int, bool, bool> =
+    cross::Fn4::new();
 // win: 517680
-static mut SET_TAB: Option<extern "C" fn(*mut TabbedWindow, c_uint)> = None;
+static mut SET_TAB: cross::Fn2<0x517680, 0x585BE0, *mut TabbedWindow, c_uint, ()> =
+    cross::Fn2::new();
 
 unsafe fn hook(base: *mut c_void) {
-    // enable cheats
-    CHEATS = base.byte_add(0xA434C0).byte_add(0x18).cast::<u8>();
-    *CHEATS = 1;
-    POWER_MANAGERS = base.byte_add(0xA47C70).cast();
-    SHIP_GRAPHS = base.byte_add(0xA3BB10).cast();
-    #[allow(clippy::missing_transmute_annotations)]
-    {
-        POWER_DRONE = mem::transmute(base.byte_add(0x4C78B0));
-        DEPOWER_DRONE = mem::transmute(base.byte_add(0x4BC5E0));
-        POWER_WEAPON = mem::transmute(base.byte_add(0x4BB730));
-        DEPOWER_WEAPON = mem::transmute(base.byte_add(0x4BB770));
-        DOOR_OPEN = mem::transmute(base.byte_add(0x498C70));
-        DOOR_CLOSE = mem::transmute(base.byte_add(0x498BB0));
-        MOVE_CREW = mem::transmute(base.byte_add(0x4855E0));
-        SET_TAB = mem::transmute(base.byte_add(0x585BE0));
-    }
+    SETTING_VALUES.init(base);
+    POWER_MANAGERS.init(base);
+    POWER_DRONE.init(base);
+    DEPOWER_DRONE.init(base);
+    POWER_WEAPON.init(base);
+    DEPOWER_WEAPON.init(base);
+    DOOR_OPEN.init(base);
+    DOOR_CLOSE.init(base);
+    MOVE_CREW.init(base);
+    SET_TAB.init(base);
+    #[cfg(target_os = "windows")]
+    let gen_input_events = base.byte_add(0x402AA0);
+    #[cfg(target_os = "linux")]
     let gen_input_events = base.byte_add(0x41C490);
-    if std::slice::from_raw_parts(gen_input_events as *const u8, 8) != b"USH\x89\xfbH\x83\xec" {
+    if std::slice::from_raw_parts(gen_input_events as *const u8, 8) != {
+        #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+        {
+            b"USH\x89\xfbH\x83\xec"
+        }
+        #[cfg(target_os = "windows")]
+        b"W\x8d|$\x08\x83\xe4\xf0"
+    } {
         log::error!(
             "mismatch: {:?}",
             std::slice::from_raw_parts(gen_input_events as *const u8, 8)
         );
         return;
     }
-    log::debug!("hooking at {gen_input_events:?}");
-    // void __fastcall CApp__GenInputEvents(CApp *const this);
+    // log::debug!("hooking at {gen_input_events:?}");
+
+    #[cfg(target_os = "linux")]
+    static mut GEN_INPUT_EVENTS: OnceLock<GenericDetour<unsafe extern "C" fn(*mut CApp)>> =
+        OnceLock::new();
+    #[cfg(target_os = "linux")]
+    pub unsafe extern "C" fn gen_input_events_hook(app: *mut CApp) {
+        GEN_INPUT_EVENTS.get().unwrap_unchecked().call(app);
+        game::loop_hook(app);
+    }
+    #[cfg(target_os = "windows")]
+    static mut GEN_INPUT_EVENTS: OnceLock<GenericDetour<unsafe extern "fastcall" fn(*mut CApp)>> =
+        OnceLock::new();
+    #[cfg(target_os = "windows")]
+    pub unsafe extern "fastcall" fn gen_input_events_hook(app: *mut CApp) {
+        GEN_INPUT_EVENTS.get().unwrap_unchecked().call(app);
+        game::loop_hook(app);
+    }
+
     GEN_INPUT_EVENTS.get_or_init(|| {
         let hook = match GenericDetour::new(
-            std::mem::transmute::<*mut std::ffi::c_void, Option<unsafe extern "C" fn(*mut CApp)>>(
+            std::mem::transmute::<*mut std::ffi::c_void, cross::Fn1<0, 0, *mut CApp, ()>>(
                 gen_input_events,
             )
+            .0
             .unwrap(),
             gen_input_events_hook,
         ) {
@@ -263,7 +253,7 @@ unsafe fn hook(base: *mut c_void) {
             }
         };
         match hook.enable() {
-            Ok(()) => log::info!("hook enabld"),
+            Ok(()) => log::info!("hook enabled"),
             Err(err) => {
                 log::error!("hook error: {err}");
             }
@@ -275,42 +265,57 @@ unsafe fn hook(base: *mut c_void) {
 #[ctor]
 unsafe fn init() {
     env_logger::init();
-    let exe = match std::env::current_exe() {
-        Ok(exe) => exe,
-        Err(err) => {
-            log::error!("failed to get current exe: {err}");
+    #[cfg(target_os = "linux")]
+    {
+        // on Linux, do LD_PRELOAD stuff
+        let exe = match std::env::current_exe() {
+            Ok(exe) => exe,
+            Err(err) => {
+                log::error!("failed to get current exe: {err}");
+                return;
+            }
+        };
+        let Some(stem) = exe.file_stem() else {
+            log::debug!("no file stem");
+            return;
+        };
+        let Some(stem) = stem.to_str() else {
+            log::debug!("stem not utf-8");
+            return;
+        };
+        if stem != "FTL" {
+            // log::debug!("stem is {stem}, not FTL");
             return;
         }
-    };
-    let Some(stem) = exe.file_stem() else {
-        log::debug!("no file stem");
-        return;
-    };
-    let Some(stem) = stem.to_str() else {
-        log::debug!("stem not utf-8");
-        return;
-    };
-    if stem != "FTL" {
-        // log::debug!("stem is {stem}, not FTL");
-        return;
-    }
-    unsafe extern "C" fn callback(
-        info: *mut libc::dl_phdr_info,
-        _size: usize,
-        _data: *mut libc::c_void,
-    ) -> i32 {
-        if (*info).dlpi_name.is_null() {
-            return 0;
+        unsafe extern "C" fn callback(
+            info: *mut libc::dl_phdr_info,
+            _size: usize,
+            _data: *mut libc::c_void,
+        ) -> i32 {
+            if (*info).dlpi_name.is_null() {
+                return 0;
+            }
+            let s = CStr::from_ptr((*info).dlpi_name);
+            if !s.is_empty() {
+                return 0;
+            }
+            let addr = (*info).dlpi_addr as *mut c_void;
+            hook(addr);
+            0
         }
-        let s = CStr::from_ptr((*info).dlpi_name);
-        if !s.is_empty() {
-            return 0;
+        if libc::dl_iterate_phdr(Some(callback), ptr::null_mut()) != 0 {
+            log::error!("dl_iterate_phdr error: {}", std::io::Error::last_os_error());
         }
-        let addr = (*info).dlpi_addr as *mut c_void;
-        hook(addr);
-        0
     }
-    if libc::dl_iterate_phdr(Some(callback), ptr::null_mut()) != 0 {
-        log::error!("dl_iterate_phdr error: {}", std::io::Error::last_os_error());
+    #[cfg(target_os = "windows")]
+    {
+        // on Windows, we aren't responsible for loading the DLL, something else must inject it
+        let base: *mut c_void;
+        std::arch::asm! {
+            "mov eax, fs:[30h]",
+            "mov {base}, [eax+8]",
+            base = out(reg) base,
+        }
+        hook(base);
     }
 }

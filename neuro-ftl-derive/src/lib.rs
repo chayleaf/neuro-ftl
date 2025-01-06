@@ -37,6 +37,9 @@ fn vtable3(_attr: TokenStream, input: TokenStream, windows: bool) -> (TokenStrea
                 args.extend(quote! {
                     , #name: #ty
                 });
+                if windows && i == 1 {
+                    args2.extend(quote! { std::ptr::null_mut(), });
+                }
                 args2.extend(quote! {
                     #name,
                 });
@@ -51,28 +54,34 @@ fn vtable3(_attr: TokenStream, input: TokenStream, windows: bool) -> (TokenStrea
             fun.unsafety = Some(syn::token::Unsafe {
                 span: Span::call_site(),
             });
-            fun.abi = Some(syn::Abi {
-                extern_token: syn::token::Extern {
-                    span: Span::call_site(),
-                },
-                name: Some(LitStr::new("C", Span::call_site())),
-            });
             if windows {
                 let mut inputs = Punctuated::new();
-                let mut first = false;
-                for inp in fun.inputs.clone() {
-                    let ty = inp.ty.clone();
-                    inputs.push(inp);
-                    if first {
-                        first = false;
+                let mut ty = None;
+                for (i, inp) in fun.inputs.clone().into_iter().enumerate() {
+                    if i == 1 {
                         inputs.push(syn::BareFnArg {
                             attrs: Default::default(),
                             name: None,
-                            ty,
+                            ty: ty.unwrap(),
                         });
                     }
+                    ty = Some(inp.ty.clone());
+                    inputs.push(inp);
                 }
                 fun.inputs = inputs;
+                fun.abi = Some(syn::Abi {
+                    extern_token: syn::token::Extern {
+                        span: Span::call_site(),
+                    },
+                    name: Some(LitStr::new("fastcall", Span::call_site())),
+                });
+            } else {
+                fun.abi = Some(syn::Abi {
+                    extern_token: syn::token::Extern {
+                        span: Span::call_site(),
+                    },
+                    name: Some(LitStr::new("C", Span::call_site())),
+                });
             }
         }
     }
@@ -88,6 +97,7 @@ fn vtable3(_attr: TokenStream, input: TokenStream, windows: bool) -> (TokenStrea
 fn vtable2(attr: TokenStream, input: TokenStream) -> TokenStream {
     let (linux1, linux2) = vtable3(attr.clone(), input.clone(), false);
     let (windows1, windows2) = vtable3(attr.clone(), input.clone(), true);
+    // panic!("{}", windows1.to_string());
     quote! {
         #[cfg(target_os = "windows")]
         #[repr(C)]

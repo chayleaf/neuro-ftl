@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 // a SystemName without is_referenceable, so it isn't put in $ref, to make the schema simpler
 #[derive(Copy, Clone, Debug, Deserialize, JsonSchemaNoRef)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum SystemName {
     Shields = 0,
     Engines = 1,
@@ -92,7 +92,7 @@ pub struct DecreasePower {
 }
 
 #[derive(Copy, Clone, Debug, Deserialize, Eq, PartialEq, JsonSchemaNoRef)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum TargetShip {
     Player,
     Enemy,
@@ -190,7 +190,7 @@ pub struct OpenStore;
 pub struct Back;
 
 #[derive(Debug, Deserialize, JsonSchemaNoRef)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum InventorySlotType {
     OverCapacity,
     AugmentationOverCapacity,
@@ -257,7 +257,7 @@ pub struct BuySystem {
 }
 
 #[derive(Copy, Clone, Debug, Deserialize, JsonSchemaNoRef, Hash, Eq, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum Direction {
     TopLeft,
     Top,
@@ -267,6 +267,21 @@ pub enum Direction {
     BottomLeft,
     Bottom,
     BottomRight,
+}
+
+impl Direction {
+    pub fn to_str(&self) -> &'static str {
+        match self {
+            Self::TopLeft => "top_left",
+            Self::Top => "top",
+            Self::TopRight => "top_right",
+            Self::Left => "left",
+            Self::Right => "right",
+            Self::BottomLeft => "bottom_left",
+            Self::Bottom => "bottom",
+            Self::BottomRight => "bottom_right",
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -295,7 +310,7 @@ pub struct RepairAll;
 pub struct SwitchStorePage;
 
 #[derive(Debug, Deserialize, JsonSchemaNoRef)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum ItemType {
     Fuel,
     Missiles,
@@ -505,8 +520,8 @@ pub enum FtlActions {
     #[name = "fire_crew"]
     FireCrew(FireCrew),
     /// Swap two inventory slots. This can be used for choosing which weapons and drones your ship
-    /// has equipped. The `overCapacity` slot type is used for an extra slot for weapons and drones
-    /// that will be deleted when you jump to a different system. The `augmentationOverCapacity`
+    /// has equipped. The `over_capacity` slot type is used for an extra slot for weapons and drones
+    /// that will be deleted when you jump to a different system. The `augmentation_over_capacity`
     /// slot type is the same, but for augments.
     #[name = "swap_inventory_slots"]
     SwapInventorySlots(SwapInventorySlots),
