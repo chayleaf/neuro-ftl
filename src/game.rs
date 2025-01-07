@@ -2283,7 +2283,7 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
                 .schema
                 .object()
                 .properties
-                .get_mut("crew_member_index")
+                .get_mut("crewMemberIndex")
                 .unwrap()
             {
                 schemars::schema::Schema::Object(x) => {
@@ -2556,7 +2556,7 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
                     .schema
                     .object()
                     .properties
-                    .get_mut("crew_member_index")
+                    .get_mut("crewMemberIndex")
                     .unwrap()
                 {
                     schemars::schema::Schema::Object(x) => {
@@ -2705,7 +2705,7 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
                 .schema
                 .object()
                 .properties
-                .get_mut("weapon_index")
+                .get_mut("weaponIndex")
                 .unwrap()
             {
                 schemars::schema::Schema::Object(x) => {
@@ -2734,7 +2734,7 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
                 .schema
                 .object()
                 .properties
-                .get_mut("drone_index")
+                .get_mut("droneIndex")
                 .unwrap()
             {
                 schemars::schema::Schema::Object(x) => {
