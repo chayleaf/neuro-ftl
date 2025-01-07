@@ -53,6 +53,7 @@ pub struct RenameShip {
 pub struct StartGame;
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct RenameCrew {
     pub crew_member_index: u8,
     pub name: String,
@@ -80,12 +81,14 @@ pub struct Choose8;
 pub struct Choose9;
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct IncreasePower {
     pub system: SystemName,
     pub amount: u8,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct DecreasePower {
     pub system: SystemName,
     pub amount: u8,
@@ -99,6 +102,7 @@ pub enum TargetShip {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct SetWeaponTargets {
     pub weapon_index: u8,
     pub target_ship: TargetShip,
@@ -107,21 +111,25 @@ pub struct SetWeaponTargets {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ActivateWeapon {
     pub weapon_index: u8,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct DeactivateWeapon {
     pub weapon_index: u8,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ActivateDrone {
     pub drone_index: u8,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct DeactivateDrone {
     pub drone_index: u8,
 }
@@ -135,6 +143,7 @@ pub struct HackSystem {
 pub struct ActivateHacking;
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct MindControl {
     pub target_ship: TargetShip,
     pub target_room_id: u8,
@@ -147,16 +156,19 @@ pub struct ActivateCloaking;
 pub struct ActivateBattery;
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct TeleportSend {
     pub target_room_id: Option<u8>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct TeleportReturn {
     pub source_room_id: u8,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct OpenDoors {
     pub door_ids: Vec<u8>,
     #[serde(default)]
@@ -164,17 +176,20 @@ pub struct OpenDoors {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct CloseDoors {
     pub door_ids: Vec<u8>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct PlanDoorRoute {
     pub first_room_id: i8,
     pub second_room_id: i8,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct MoveCrew {
     pub crew_member_indices: Vec<u8>,
     pub room_id: u8,
@@ -209,6 +224,7 @@ pub struct UpgradeSystem {
 pub struct UndoUpgrades;
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct FireCrew {
     pub crew_member_index: u8,
 }
@@ -349,6 +365,7 @@ pub struct PauseGame;
 pub struct UnpauseGame;
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct Wait {
     #[serde(default)]
     pub distress_signal: bool,

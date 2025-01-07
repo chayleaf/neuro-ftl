@@ -4608,7 +4608,6 @@ pub struct VtableCollideable {
     pub dtor: Option<fn(*mut Collideable)>,
     pub delete_dtor: Option<fn(*mut Collideable)>,
     pub collision_moving:
-        // this, start, finish, damage, raytrace
         Option<fn(*mut Collideable, Pointf, Pointf, Damage, bool) -> CollisionResponse>,
     pub damage_beam: Option<fn(*mut Collideable, Pointf, Pointf, Damage) -> bool>,
     pub damage_area: Option<fn(*mut Collideable, Pointf, Damage, bool) -> bool>,
@@ -6193,16 +6192,22 @@ pub struct DroneSystem {
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
     pub base: ShipSystem,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x248)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x1C0)]
     pub drones: Vector<*mut Drone>,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x260)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x1CC)]
     pub drone_count: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x264)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x1D0)]
     pub drone_start: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x268)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x1D4)]
     pub target_ship: *mut Targetable,
+    #[cfg_attr(target_os = "windows", test_offset = 0x1D8)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x270)]
     pub user_powered: VectorBool,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x298)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x1EC)]
     pub slot_count: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x29c)]
     pub i_starting_battery_power: c_int,
@@ -7029,15 +7034,19 @@ pub struct ShipSystem {
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x21c)]
     pub i_battery_power: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x220)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x1A8)]
     pub i_hack_effect: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x224)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x1AC)]
     pub b_under_attack: bool,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x225)]
     pub b_level_boostable: bool,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x226)]
     pub b_trigger_ion: bool,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x228)]
+    #[cfg_attr(target_os = "windows", test_offset = 0x1B0)]
     pub damaging_effects: Vector<Animation>,
+    #[cfg_attr(target_os = "windows", test_offset = 0x1BC)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x240)]
     pub computer_level: c_int,
 }

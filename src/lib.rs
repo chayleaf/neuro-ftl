@@ -220,7 +220,6 @@ unsafe fn hook(base: *mut c_void) {
         );
         return;
     }
-    // log::debug!("hooking at {gen_input_events:?}");
 
     #[cfg(target_os = "linux")]
     static mut GEN_INPUT_EVENTS: OnceLock<GenericDetour<unsafe extern "C" fn(*mut CApp)>> =
@@ -263,14 +262,13 @@ unsafe fn hook(base: *mut c_void) {
     });
 }
 
-static LOGGER: OnceLock<logger::Logger> = OnceLock::new();
-
 #[ctor]
 unsafe fn init() {
-    let logger = LOGGER.get_or_init(logger::Logger::new);
-    log::set_logger(logger).unwrap();
+    logger::init();
+    // env_logger::init();
     // this the `konigsberg` code which contains a steam API shim so this can be used as a steam
     // API wrapper
+    #[cfg(target_os = "windows")]
     let _ = konigsberg::SteamAPI_SteamApps_v009;
     #[cfg(target_os = "linux")]
     {

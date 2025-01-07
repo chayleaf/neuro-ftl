@@ -11,5 +11,7 @@ pkgs.mkShell {
     })
 
   ];
+  buildInputs = [ pkgs.windows.pthreads ];
+
   "CARGO_TARGET_${pkgs.targetPlatform.rust.cargoEnvVarTarget}_LINKER" = "${pkgs.stdenv.cc.targetPrefix}cc";
 }
