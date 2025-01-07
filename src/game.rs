@@ -1925,9 +1925,9 @@ impl neuro_sama::game::GameMut for State {
                     let store = &mut *(*(*(*app).world).base_location_event).p_store;
                     store.b_show_page2 = !store.b_show_page2;
                     store.current_button = if store.b_show_page2 {
-                        ptr::addr_of_mut!(store.page1)
-                    } else {
                         ptr::addr_of_mut!(store.page2)
+                    } else {
+                        ptr::addr_of_mut!(store.page1)
                     };
                     Ok(Cow::from("successfully switched the store page").into())
                 }
