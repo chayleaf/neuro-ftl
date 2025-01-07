@@ -2409,7 +2409,9 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
             }
             ret.actions.insert(actions::Jump::name(), meta);
         }
-        ret.add::<actions::Wait>();
+        if s.wait_button.base.b_active {
+            ret.add::<actions::Wait>();
+        }
         return ret;
     }
     if (*gui).choice_box.base.b_open {
