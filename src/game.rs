@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use actions::{FtlActions, InventorySlotType, TargetShip};
+use actions::{FtlActions, InventorySlotType, ItemType, TargetShip};
 use futures_util::{SinkExt, StreamExt};
 use indexmap::IndexMap;
 use neuro_sama::game::{Action, ApiMut};
@@ -16,7 +16,7 @@ use rand::Rng;
 use serde::Serialize;
 use tokio::sync::mpsc;
 
-use crate::bindings::{self, power_manager, CApp, ConfirmWindow, Door, StoreType, System};
+use crate::bindings::{self, power_manager, xc, xm, CApp, Door, StoreType, System};
 
 pub mod actions;
 // mod context;
@@ -39,7 +39,7 @@ struct State {
 unsafe impl Sync for State {}
 unsafe impl Send for State {}
 
-unsafe fn resource_event_str(res: &bindings::ResourceEvent) -> String {
+fn resource_event_str(res: &bindings::ResourceEvent) -> String {
     let mut ret = Vec::new();
     if res.fuel > 0 {
         ret.push(format!("will get {} fuel", res.fuel));
@@ -53,22 +53,22 @@ unsafe fn resource_event_str(res: &bindings::ResourceEvent) -> String {
     if res.scrap > 0 {
         ret.push(format!("will get {} scrap", res.scrap));
     }
-    if !res.weapon.is_null() && (*res.weapon).type_ != -1 {
+    if res.weapon().is_some_and(|x| x.type_ != -1) {
         ret.push(format!(
             "will get a weapon ({})",
-            (*res.weapon).desc.title.to_str()
+            res.weapon().unwrap().desc.title.to_str()
         ));
     }
-    if !res.drone.is_null() && (*res.drone).type_ != -1 {
+    if res.drone().is_some_and(|x| x.type_ != -1) {
         ret.push(format!(
             "will get a drone ({})",
-            (*res.drone).desc.title.to_str()
+            res.drone().unwrap().desc.title.to_str()
         ));
     }
-    if !res.augment.is_null() && (*res.augment).type_ != -1 {
+    if res.augment().is_some_and(|x| x.type_ != -1) {
         ret.push(format!(
             "will get an augment ({})",
-            (*res.augment).desc.title.to_str()
+            res.augment().unwrap().desc.title.to_str()
         ));
     }
     match res.crew {
@@ -201,20 +201,21 @@ impl neuro_sama::game::GameMut for State {
         if app.is_null() {
             return Err(Cow::from("CApp is null, game is broken").into());
         }
+        let app = unsafe { &mut *app };
         log::debug!("handling action: {action:?}");
         let ret: Result<Option<Cow<'static, str>>, Option<Cow<'static, str>>> = match action {
             // only main menu
-            FtlActions::SkipCredits(event) => unsafe {
+            FtlActions::SkipCredits(event) => {
                 if self.actions.valid1(&event) {
-                    if (*app).menu.b_open {
-                        if (*app).menu.b_credit_screen {
-                            (*app).menu.b_credit_screen = false;
+                    if app.menu.b_open {
+                        if app.menu.b_credit_screen {
+                            app.menu.b_credit_screen = false;
                             Ok(Cow::from("skipped credits").into())
                         } else {
                             Err(Cow::from("credits aren't playing").into())
                         }
-                    } else if (*(*app).gui).game_over_screen.b_showing_credits {
-                        (*(*app).gui).game_over_screen.b_showing_credits = false;
+                    } else if app.gui().unwrap().game_over_screen.b_showing_credits {
+                        app.gui_mut().unwrap().game_over_screen.b_showing_credits = false;
                         Ok(Cow::from("skipped credits").into())
                     } else {
                         Err(Cow::from("credits aren't playing").into())
@@ -222,76 +223,90 @@ impl neuro_sama::game::GameMut for State {
                 } else {
                     Err(Cow::from("credits aren't playing").into())
                 }
-            },
-            FtlActions::NewGame(event) => unsafe {
+            }
+            FtlActions::NewGame(event) => {
                 if self.actions.valid1(&event)
-                    && (*app).menu.b_open
-                    && (*app).menu.start_button.base.b_active
+                    && app.menu.b_open
+                    && app.menu.start_button.base.b_active
                 {
-                    for btn in (*app).menu.buttons.iter() {
-                        (**btn).base.b_hover = false;
+                    for btn in app.menu.buttons.iter() {
+                        let btn = unsafe { xm(*btn).unwrap() };
+                        btn.base.b_hover = false;
                     }
-                    (*app).menu.start_button.base.b_hover = true;
-                    (*(*app).base.vtable).on_l_button_down(ptr::addr_of_mut!((*app).base), 0, 0);
+                    app.menu.start_button.base.b_hover = true;
+                    unsafe {
+                        app.base
+                            .vtable()
+                            .on_l_button_down(ptr::addr_of_mut!(app.base), 0, 0)
+                    };
                     Ok(Cow::from("starting a new game").into())
                 } else {
                     Err(Cow::from("can't start a new game right now").into())
                 }
-            },
-            FtlActions::Continue(event) => unsafe {
+            }
+            FtlActions::Continue(event) => {
                 if self.actions.valid1(&event)
-                    && (*app).menu.b_open
-                    && (*app).menu.continue_button.base.b_active
+                    && app.menu.b_open
+                    && app.menu.continue_button.base.b_active
                 {
-                    for btn in (*app).menu.buttons.iter() {
-                        (**btn).base.b_hover = false;
+                    for btn in app.menu.buttons.iter() {
+                        let btn = unsafe { xm(*btn).unwrap() };
+                        btn.base.b_hover = false;
                     }
-                    (*app).menu.start_button.base.b_hover = true;
-                    (*(*app).base.vtable).on_l_button_down(ptr::addr_of_mut!((*app).base), 0, 0);
+                    app.menu.start_button.base.b_hover = false;
+                    app.menu.continue_button.base.b_hover = true;
+                    unsafe {
+                        app.base
+                            .vtable()
+                            .on_l_button_down(ptr::addr_of_mut!(app.base), 0, 0)
+                    };
                     Ok(Cow::from("continuing from existing save").into())
                 } else {
                     Err(Cow::from("can't continue from an existing save").into())
                 }
-            },
-            FtlActions::Confirm(_) | FtlActions::Deny(_) => unsafe {
+            }
+            FtlActions::Confirm(_) | FtlActions::Deny(_) => {
                 let confirm = matches!(action, FtlActions::Confirm(_));
                 if confirm && !self.actions.valid::<actions::Confirm>() {
                     Err(Cow::from("nothing to confirm").into())
                 } else if !confirm && !self.actions.valid::<actions::Deny>() {
                     Err(Cow::from("nothing to deny").into())
-                } else {
-                    let exec = move |window: &mut ConfirmWindow| {
-                        window.base.b_open = false;
-                        window.result = confirm;
-                        (*(*app).base.vtable).on_l_button_down(
-                            ptr::addr_of_mut!((*app).base),
-                            0,
-                            0,
-                        );
+                } else if app.menu.b_open && app.menu.confirm_new_game.base.b_open {
+                    let window = &mut app.menu.confirm_new_game;
+                    window.base.b_open = false;
+                    window.result = confirm;
+                    unsafe {
+                        app.base
+                            .vtable()
+                            .on_l_button_down(ptr::addr_of_mut!(app.base), 0, 0)
                     };
-                    if (*app).menu.b_open && (*app).menu.confirm_new_game.base.b_open {
-                        exec(&mut (*app).menu.confirm_new_game);
-                        if confirm {
-                            Ok(Cow::from("starting a new game").into())
-                        } else {
-                            Ok(Cow::from("not starting a new game").into())
-                        }
-                    } else if !(*app).menu.b_open && (*(*app).gui).leave_crew_dialog.base.b_open {
-                        exec(&mut (*(*app).gui).leave_crew_dialog);
-                        if confirm {
-                            Ok(Cow::from("leaving crew members behind").into())
-                        } else {
-                            Ok(Cow::from("canceling the jump").into())
-                        }
+                    if confirm {
+                        Ok(Cow::from("starting a new game").into())
                     } else {
-                        Err(Cow::from("nothing to confirm").into())
+                        Ok(Cow::from("not starting a new game").into())
                     }
+                } else if !app.menu.b_open && app.gui().unwrap().leave_crew_dialog.base.b_open {
+                    let window = &mut app.gui_mut().unwrap().leave_crew_dialog;
+                    window.base.b_open = false;
+                    window.result = confirm;
+                    unsafe {
+                        app.base
+                            .vtable()
+                            .on_l_button_down(ptr::addr_of_mut!(app.base), 0, 0)
+                    };
+                    if confirm {
+                        Ok(Cow::from("leaving crew members behind").into())
+                    } else {
+                        Ok(Cow::from("canceling the jump").into())
+                    }
+                } else {
+                    Err(Cow::from("nothing to confirm").into())
                 }
-            },
-            FtlActions::RenameShip(event) => unsafe {
+            }
+            FtlActions::RenameShip(event) => {
                 if self.actions.valid1(&event) {
-                    (*app).menu.ship_builder.name_input.b_active = true;
-                    let old = (*app)
+                    app.menu.ship_builder.name_input.b_active = true;
+                    let old = app
                         .menu
                         .ship_builder
                         .name_input
@@ -299,13 +314,19 @@ impl neuro_sama::game::GameMut for State {
                         .iter()
                         .filter_map(|x| char::from_u32(*x as u32))
                         .collect::<String>();
-                    (*(*app).base.vtable)
-                        .on_text_event(ptr::addr_of_mut!((*app).base), bindings::TextEvent::Clear);
-                    for char in event.name.chars() {
-                        (*(*app).base.vtable)
-                            .on_text_input(ptr::addr_of_mut!((*app).base), char as i32);
+                    unsafe {
+                        app.base
+                            .vtable()
+                            .on_text_event(ptr::addr_of_mut!(app.base), bindings::TextEvent::Clear);
                     }
-                    (*app).menu.ship_builder.name_input.b_active = false;
+                    for char in event.name.chars() {
+                        unsafe {
+                            app.base
+                                .vtable()
+                                .on_text_input(ptr::addr_of_mut!(app.base), char as i32);
+                        }
+                    }
+                    app.menu.ship_builder.name_input.b_active = false;
                     Ok(Cow::from(format!(
                         "renamed the ship, old ship name is {old:?}, new ship name is {:?}",
                         event.name
@@ -314,20 +335,21 @@ impl neuro_sama::game::GameMut for State {
                 } else {
                     Err(Cow::from("can't rename the ship at this time").into())
                 }
-            },
-            FtlActions::RenameCrew(event) => unsafe {
+            }
+            FtlActions::RenameCrew(event) => {
                 if self.actions.valid1(&event) {
-                    if (*app).menu.ship_builder.b_open {
-                        if let Some(member) = (*app)
+                    if app.menu.ship_builder.b_open {
+                        if let Some(member) = app
                             .menu
                             .ship_builder
                             .v_crew_boxes
                             .iter()
                             .nth(event.crew_member_index.into())
                         {
-                            (**member).base.b_quick_renaming = true;
-                            (**member).base.name_input.b_active = true;
-                            let old = (**member)
+                            let member = unsafe { xm(*member).unwrap() };
+                            member.base.b_quick_renaming = true;
+                            member.base.name_input.b_active = true;
+                            let old = member
                                 .base
                                 .name_input
                                 .text
@@ -335,15 +357,20 @@ impl neuro_sama::game::GameMut for State {
                                 .filter_map(|x| char::from_u32(*x as u32))
                                 .collect::<String>();
 
-                            (*(*app).base.vtable).on_text_event(
-                                ptr::addr_of_mut!((*app).base),
-                                bindings::TextEvent::Clear,
-                            );
+                            unsafe {
+                                app.base.vtable().on_text_event(
+                                    ptr::addr_of_mut!(app.base),
+                                    bindings::TextEvent::Clear,
+                                )
+                            };
                             for char in event.name.chars() {
-                                (*(*app).base.vtable)
-                                    .on_text_input(ptr::addr_of_mut!((*app).base), char as i32);
+                                unsafe {
+                                    app.base
+                                        .vtable()
+                                        .on_text_input(ptr::addr_of_mut!(app.base), char as i32)
+                                };
                             }
-                            (**member).base.name_input.b_active = false;
+                            member.base.name_input.b_active = false;
 
                             Ok(Cow::from(format!(
                                 "renamed the crew member, old name is {old:?}, new name is {:?}",
@@ -353,85 +380,103 @@ impl neuro_sama::game::GameMut for State {
                         } else {
                             Err(Cow::from(format!(
                                 "index out of range, there are only {} crew members",
-                                (*app).menu.ship_builder.v_crew_boxes.len()
+                                app.menu.ship_builder.v_crew_boxes.len()
                             ))
                             .into())
                         }
-                    } else {
-                        let crew = &mut (*(*app).gui).crew_screen;
-                        if let Some(c) = (*(*app).gui)
-                            .ship_manager()
-                            .v_crew_list
-                            .get(event.crew_member_index.into())
-                            .copied()
-                        {
-                            if let Some(cc) = crew.crew_boxes.iter().find(|x| {
-                                !(***x).base.item.is_empty() && (***x).base.item.p_crew == c
-                            }) {
-                                if (**cc).b_show_rename {
-                                    for b in crew.crew_boxes.iter() {
-                                        (**b).delete_button.base.b_hover = false;
-                                        (**b).rename_button.base.b_hover = false;
-                                    }
-                                    (**cc).rename_button.base.b_hover = true;
-                                    (*crew.base.vtable).mouse_click(
+                    } else if let Some(c) = app
+                        .gui()
+                        .unwrap()
+                        .ship_manager()
+                        .unwrap()
+                        .v_crew_list
+                        .get(event.crew_member_index.into())
+                        .copied()
+                    {
+                        let crew = &mut app.gui_mut().unwrap().crew_screen;
+                        let cc = crew
+                            .crew_boxes
+                            .iter()
+                            .map(|x| unsafe { xm(*x).unwrap() })
+                            .find(|x| !x.base.item.is_empty() && x.base.item.p_crew == c);
+                        if let Some(cc) = cc {
+                            if cc.b_show_rename {
+                                for b in crew.crew_boxes.iter() {
+                                    let b = unsafe { xm(*b).unwrap() };
+                                    b.delete_button.base.b_hover = false;
+                                    b.rename_button.base.b_hover = false;
+                                }
+                                cc.rename_button.base.b_hover = true;
+                                unsafe {
+                                    crew.base.vtable().mouse_click(
                                         ptr::addr_of_mut!(crew.base),
                                         0,
                                         0,
                                     );
-                                    if (**cc).name_input.b_active {
-                                        let old = (**cc)
-                                            .name_input
-                                            .text
-                                            .iter()
-                                            .filter_map(|x| char::from_u32(*x as u32))
-                                            .collect::<String>();
+                                }
+                                if cc.name_input.b_active {
+                                    let old = cc
+                                        .name_input
+                                        .text
+                                        .iter()
+                                        .filter_map(|x| char::from_u32(*x as u32))
+                                        .collect::<String>();
 
-                                        (*(*app).base.vtable).on_text_event(
-                                            ptr::addr_of_mut!((*app).base),
+                                    unsafe {
+                                        app.base.vtable().on_text_event(
+                                            ptr::addr_of_mut!(app.base),
                                             bindings::TextEvent::Clear,
                                         );
-                                        for char in event.name.chars() {
-                                            (*(*app).base.vtable).on_text_input(
-                                                ptr::addr_of_mut!((*app).base),
+                                    }
+                                    for char in event.name.chars() {
+                                        unsafe {
+                                            app.base.vtable().on_text_input(
+                                                ptr::addr_of_mut!(app.base),
                                                 char as i32,
                                             );
                                         }
-                                        (*crew.base.vtable).mouse_click(
+                                    }
+                                    let crew = &mut app.gui_mut().unwrap().crew_screen;
+                                    unsafe {
+                                        crew.base.vtable().mouse_click(
                                             ptr::addr_of_mut!(crew.base),
                                             0,
                                             0,
                                         );
-                                        Ok(Cow::from(format!(
+                                    }
+                                    Ok(Cow::from(format!(
                                             "renamed the crew member, old name is {old:?}, new name is {:?}",
                                             event.name
                                         ))
                                         .into())
-                                    } else {
-                                        Err(Cow::from("couldn't rename the crew member, this is a bug in the mod").into())
-                                    }
                                 } else {
-                                    Err(Cow::from("can't rename the crew member").into())
+                                    Err(Cow::from(
+                                        "couldn't rename the crew member, this is a bug in the mod",
+                                    )
+                                    .into())
                                 }
                             } else {
-                                Err(Cow::from(
-                                    "crew member box not found, this is probably a bug in the mod",
-                                )
-                                .into())
+                                Err(Cow::from("can't rename the crew member").into())
                             }
                         } else {
-                            Err(Cow::from("crew member out of range").into())
+                            Err(Cow::from(
+                                "crew member box not found, this is probably a bug in the mod",
+                            )
+                            .into())
                         }
+                    } else {
+                        Err(Cow::from("crew member out of range").into())
                     }
                 } else {
                     Err(Cow::from("can't rename the ship at this time").into())
                 }
-            },
-            FtlActions::StartGame(event) => unsafe {
+            }
+            FtlActions::StartGame(event) => {
                 if self.actions.valid1(&event) {
-                    let b = &mut (*app).menu.ship_builder;
+                    let b = &mut app.menu.ship_builder;
                     for b in b.v_crew_boxes.iter() {
-                        (**b).customize_button.base.b_hover = false;
+                        let b = unsafe { xm(*b).unwrap() };
+                        b.customize_button.base.b_hover = false;
                     }
                     // force disable advanced edition to make my life easier
                     if b.advanced_off_button.base.b_active {
@@ -448,30 +493,30 @@ impl neuro_sama::game::GameMut for State {
                         b.type_b.base.b_hover = false;
                         b.type_c.base.b_hover = false;
                         b.advanced_off_button.base.b_hover = true;
-                        (*(*app).base.vtable).on_l_button_down(
-                            ptr::addr_of_mut!((*app).base),
-                            0,
-                            0,
-                        );
+                        unsafe {
+                            app.base
+                                .vtable()
+                                .on_l_button_down(ptr::addr_of_mut!(app.base), 0, 0);
+                        }
                     }
                     // force enable easy mode to make neuro's life easier
                     if b.easy_button.base.b_active {
                         b.start_button.base.b_hover = false;
                         b.hard_button.base.b_hover = false;
                         b.easy_button.base.b_hover = true;
-                        (*(*app).base.vtable).on_l_button_down(
-                            ptr::addr_of_mut!((*app).base),
-                            0,
-                            0,
-                        );
+                        unsafe {
+                            app.base
+                                .vtable()
+                                .on_l_button_down(ptr::addr_of_mut!(app.base), 0, 0);
+                        }
                     }
                     if b.start_button.base.b_active {
                         b.start_button.base.b_hover = true;
-                        (*(*app).base.vtable).on_l_button_down(
-                            ptr::addr_of_mut!((*app).base),
-                            0,
-                            0,
-                        );
+                        unsafe {
+                            app.base
+                                .vtable()
+                                .on_l_button_down(ptr::addr_of_mut!(app.base), 0, 0);
+                        }
                         Ok(Cow::from("successfully started the game").into())
                     } else {
                         Err(Cow::from("couldn't start the game, the game broke").into())
@@ -479,7 +524,7 @@ impl neuro_sama::game::GameMut for State {
                 } else {
                     Err(Cow::from("can't start the game at this time").into())
                 }
-            },
+            }
             /*
              * ship selection, to select a ship:
              * b.ship_select.b_open = true;
@@ -490,14 +535,18 @@ impl neuro_sama::game::GameMut for State {
              * b.ship_select.selected_ship = 0..=9;
              * b.ship_select.current_type = 0..=2;
              */
-            FtlActions::MainMenu(event) => unsafe {
-                if self.actions.valid1(&event) && (*(*app).gui).game_over_screen.base.b_open {
-                    (*(*app).base.vtable).on_key_down(ptr::addr_of_mut!((*app).base), 27);
+            FtlActions::MainMenu(event) => {
+                if self.actions.valid1(&event) && app.gui().unwrap().game_over_screen.base.b_open {
+                    unsafe {
+                        app.base
+                            .vtable()
+                            .on_key_down(ptr::addr_of_mut!(app.base), 27);
+                    }
                     Ok(Cow::from("entered the main menu").into())
                 } else {
                     Err(Cow::from("can't enter the main menu at this time").into())
                 }
-            },
+            }
             FtlActions::Choose0(_)
             | FtlActions::Choose1(_)
             | FtlActions::Choose2(_)
@@ -507,7 +556,7 @@ impl neuro_sama::game::GameMut for State {
             | FtlActions::Choose6(_)
             | FtlActions::Choose7(_)
             | FtlActions::Choose8(_)
-            | FtlActions::Choose9(_) => unsafe {
+            | FtlActions::Choose9(_) => {
                 let (index, valid) = match action {
                     FtlActions::Choose0(event) => (0usize, self.actions.valid1(&event)),
                     FtlActions::Choose1(event) => (1usize, self.actions.valid1(&event)),
@@ -522,18 +571,27 @@ impl neuro_sama::game::GameMut for State {
                     _ => panic!(),
                 };
                 if valid {
-                    if let Some(b) = (*(*app).gui).choice_box.choices.get(index) {
+                    if let Some(b) = app.gui().unwrap().choice_box.choices.get(index) {
                         if b.type_ == 1 {
                             Err(Cow::from(format!("option {index} requirements not met, can't choose this! Please pick a different option.")).into())
                         } else {
-                            (*(*app).gui).choice_box.selected_choice = index as i32;
-                            (*(*(*app).gui).choice_box.base.vtable)
-                                .close(ptr::addr_of_mut!((*(*app).gui).choice_box.base));
+                            app.gui_mut().unwrap().choice_box.selected_choice = index as i32;
+                            unsafe {
+                                app.gui().unwrap().choice_box.base.vtable().close(
+                                    ptr::addr_of_mut!(app.gui_mut().unwrap().choice_box.base),
+                                );
+                            }
                             Ok(Cow::from(format!(
                                 "option {} chosen.{}",
                                 index,
                                 resource_event_str(
-                                    &(*(*app).gui).choice_box.choices.get(index).unwrap().rewards
+                                    &app.gui()
+                                        .unwrap()
+                                        .choice_box
+                                        .choices
+                                        .get(index)
+                                        .unwrap()
+                                        .rewards
                                 )
                             ))
                             .into())
@@ -544,8 +602,8 @@ impl neuro_sama::game::GameMut for State {
                 } else {
                     Err(Cow::from("can't choose an event option at the time").into())
                 }
-            },
-            FtlActions::IncreaseSystemPower(_) | FtlActions::DecreaseSystemPower(_) => unsafe {
+            }
+            FtlActions::IncreaseSystemPower(_) | FtlActions::DecreaseSystemPower(_) => {
                 let (valid, system, amount, increase) = match action {
                     FtlActions::IncreaseSystemPower(event) => (
                         self.actions.valid1(&event),
@@ -563,8 +621,13 @@ impl neuro_sama::game::GameMut for State {
                 };
                 if valid {
                     let system = System::from_id(system as i32).unwrap();
-                    if let Some(system) =
-                        (*(*(*app).gui).sys_control.ship_manager).system_mut(system)
+                    if let Some(system) = app
+                        .gui_mut()
+                        .unwrap()
+                        .sys_control
+                        .ship_manager_mut()
+                        .unwrap()
+                        .system_mut(system)
                     {
                         if increase {
                             if system.i_lock_count == -1 || system.i_lock_count > 0 {
@@ -576,10 +639,12 @@ impl neuro_sama::game::GameMut for State {
                                 .into())
                             } else if !system.b_needs_power {
                                 Err(Cow::from("the system does not require any power").into())
-                            } else if (*system.vtable).force_increase_power(
-                                std::ptr::addr_of_mut!(*system),
-                                amount.into(),
-                            ) {
+                            } else if unsafe {
+                                system.vtable().force_increase_power(
+                                    std::ptr::addr_of_mut!(*system),
+                                    amount.into(),
+                                )
+                            } {
                                 system.last_user_power = system.i_battery_power
                                     + system.i_bonus_power
                                     + system.power_state.first;
@@ -603,9 +668,12 @@ impl neuro_sama::game::GameMut for State {
                                 "the system has been hacked and can't be controlled at the time",
                             )
                             .into())
-                        } else if (*system.vtable)
-                            .force_decrease_power(std::ptr::addr_of_mut!(*system), amount.into())
-                        {
+                        } else if unsafe {
+                            system.vtable().force_decrease_power(
+                                std::ptr::addr_of_mut!(*system),
+                                amount.into(),
+                            )
+                        } {
                             system.last_user_power = system.i_battery_power
                                 + system.i_bonus_power
                                 + system.power_state.first;
@@ -630,24 +698,24 @@ impl neuro_sama::game::GameMut for State {
                 } else {
                     Err(Cow::from("can't decrease a system's power at the time").into())
                 }
-            },
-            FtlActions::SetWeaponTargets(event) => unsafe {
+            }
+            FtlActions::SetWeaponTargets(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't target a weapon at the time").into())
                 } else if event.target_room_ids.is_empty() {
                     Err(Cow::from("must choose at least a single target").into())
                 } else {
-                    let gui = &*(*app).gui;
-                    let ship_manager = gui.ship_manager();
-                    let weapons = ship_manager.weapon_system();
+                    let gui = app.gui().unwrap();
+                    let ship_manager = gui.ship_manager().unwrap();
+                    let weapons = ship_manager.weapon_system().unwrap();
                     if let Some(weapon) = weapons
                         .weapons
                         .get(event.weapon_index.into())
                         .filter(|x| !x.is_null())
                     {
-                        let weapon = &mut **weapon;
+                        let weapon = unsafe { xm(*weapon).unwrap() };
                         if event.target_ship == TargetShip::Player
-                            && !(*weapon.blueprint).can_target_self()
+                            && !weapon.blueprint().unwrap().can_target_self()
                         {
                             Err(Cow::from("can't target the player ship with this weapon").into())
                         } else if event.target_ship == TargetShip::Enemy
@@ -667,9 +735,12 @@ impl neuro_sama::game::GameMut for State {
                         } else {
                             let target_ship = match event.target_ship {
                                 TargetShip::Player => ship_manager,
-                                TargetShip::Enemy => {
-                                    &*(*gui.combat_control.current_target).ship_manager
-                                }
+                                TargetShip::Enemy => gui
+                                    .combat_control
+                                    .current_target()
+                                    .unwrap()
+                                    .ship_manager()
+                                    .unwrap(),
                             };
                             match event
                                 .target_room_ids
@@ -679,9 +750,10 @@ impl neuro_sama::game::GameMut for State {
                                         .ship
                                         .v_room_list
                                         .iter()
-                                        .find(|x| (***x).i_room_id == i32::from(room))
+                                        .map(|x| unsafe { xc(*x).unwrap() })
+                                        .find(|x| x.i_room_id == i32::from(room))
                                     {
-                                        let rect = &(**room).rect;
+                                        let rect = &room.rect;
                                         Ok((
                                             (rect.x + rect.w / 2) as f32,
                                             (rect.y + rect.h / 2) as f32,
@@ -724,8 +796,8 @@ impl neuro_sama::game::GameMut for State {
                         Err(Cow::from("no weapon with this index").into())
                     }
                 }
-            },
-            FtlActions::ActivateDrone(_) | FtlActions::DeactivateDrone(_) => unsafe {
+            }
+            FtlActions::ActivateDrone(_) | FtlActions::DeactivateDrone(_) => {
                 let (index, valid, activate) = match action {
                     FtlActions::ActivateDrone(event) => {
                         (event.drone_index, self.actions.valid1(&event), true)
@@ -738,9 +810,8 @@ impl neuro_sama::game::GameMut for State {
                 if !valid {
                     Err(Cow::from("can't control a drone at the time").into())
                 } else {
-                    let cc = &(*(*app).gui).combat_control;
-                    let ship_manager = (*(*app).gui).ship_manager_mut();
-                    let drone_system = ship_manager.drone_system();
+                    let ship_manager = app.gui_mut().unwrap().ship_manager_mut().unwrap();
+                    let drone_system = ship_manager.drone_system().unwrap();
                     if drone_system.base.i_lock_count == -1 || drone_system.base.i_lock_count > 0 {
                         Err(Cow::from("the drone system can't be controlled at the time").into())
                     } else if drone_system.base.i_hack_effect > 1 {
@@ -748,83 +819,90 @@ impl neuro_sama::game::GameMut for State {
                             "the drone system has been hacked and can't be controlled at the time",
                         )
                         .into())
-                    } else if usize::from(index) >= cc.drone_control.base.boxes.len() {
-                        Err(Cow::from("index out of range").into())
-                    } else if let Some(b) = cc
-                        .drone_control
-                        .base
-                        .boxes
-                        .get(index.into())
-                        .map(|x| x.cast::<bindings::DroneBox>())
-                        .filter(|x| !x.is_null())
-                        .map(|x| &*x)
-                        .filter(|x| !x.p_drone.is_null())
-                    {
-                        if activate {
-                            let was_deployed = !(*b.p_drone).deployed;
-                            if (*b.p_drone).powered {
-                                Err(Cow::from("this drone is already powered").into())
-                            } else if !(*b.p_drone).deployed && ship_manager.drone_count() == 0 {
-                                Err(
-                                    Cow::from("you have no drone parts left to deploy this drone")
-                                        .into(),
-                                )
-                            } else if !(*b.p_drone).deployed
-                                && !(*(*b.p_drone).vtable).can_be_deployed(b.p_drone)
-                            {
-                                Err(Cow::from("the drone can't currently be deployed, probably because there's no enemy ship").into())
-                            } else if (*b.p_drone).destroyed_timer > 0.0 {
-                                Err(Cow::from(
+                    } else {
+                        let cc = &app.gui().unwrap().combat_control;
+                        if usize::from(index) >= cc.drone_control.base.boxes.len() {
+                            Err(Cow::from("index out of range").into())
+                        } else if let Some(b) = cc
+                            .drone_control
+                            .base
+                            .boxes
+                            .get(index.into())
+                            .map(|x| x.cast::<bindings::DroneBox>())
+                            .map(|x| unsafe { xc(x).unwrap() })
+                            .filter(|x| x.drone().is_some())
+                        {
+                            let ship_manager = app.gui_mut().unwrap().ship_manager_mut().unwrap();
+                            let drone_system = ship_manager.drone_system().unwrap();
+                            let drone = b.drone().unwrap();
+                            if activate {
+                                let was_deployed = !drone.deployed;
+                                if drone.powered {
+                                    Err(Cow::from("this drone is already powered").into())
+                                } else if !drone.deployed && ship_manager.drone_count() == 0 {
+                                    Err(Cow::from(
+                                        "you have no drone parts left to deploy this drone",
+                                    )
+                                    .into())
+                                } else if !drone.deployed
+                                    && !unsafe { drone.vtable().can_be_deployed(b.p_drone) }
+                                {
+                                    Err(Cow::from("the drone can't currently be deployed, probably because there's no enemy ship").into())
+                                } else if drone.destroyed_timer > 0.0 {
+                                    Err(Cow::from(
                                 "the drone is still rebuilding and can't be deployed at the moment",
                             )
                             .into())
-                            } else if drone_system.base.available_power()
-                                < (*b.p_drone).required_power()
-                            {
-                                // not enough power
-                                if drone_system.base.power_max() < (*b.p_drone).required_power() {
-                                    Err(Cow::from(
-                                    format!("the drone system is currently at {}/{} power usage, while the drone requires {} power, you could try upgrading the system to increase max power", drone_system.base.effective_power(), drone_system.base.max_power(), (*b.p_drone).required_power()),
-                                )
-                                .into())
-                                } else if drone_system.base.power_state.second
-                                    - drone_system.base.power_state.first
-                                    >= (*b.p_drone).required_power()
-                                    && drone_system.base.damage() > 0
+                                } else if drone_system.base.available_power()
+                                    < drone.required_power()
                                 {
-                                    Err(Cow::from(
-                                    format!("the drone system is currently at {}/{} power usage, while the drone requires {} power, you could try repairing the system to increase max power", drone_system.base.effective_power(), drone_system.base.max_power(), (*b.p_drone).required_power()),
+                                    // not enough power
+                                    if drone_system.base.power_max() < drone.required_power() {
+                                        Err(Cow::from(
+                                    format!("the drone system is currently at {}/{} power usage, while the drone requires {} power, you could try upgrading the system to increase max power", drone_system.base.effective_power(), drone_system.base.max_power(), drone.required_power()),
                                 )
                                 .into())
-                                } else {
-                                    Err(Cow::from(
-                                    format!("the drone system is currently at {}/{} power usage, while the drone requires {} power, you could try powering down other drones", drone_system.base.effective_power(), drone_system.base.max_power(), (*b.p_drone).required_power()),
+                                    } else if drone_system.base.power_state.second
+                                        - drone_system.base.power_state.first
+                                        >= drone.required_power()
+                                        && drone_system.base.damage() > 0
+                                    {
+                                        Err(Cow::from(
+                                    format!("the drone system is currently at {}/{} power usage, while the drone requires {} power, you could try repairing the system to increase max power", drone_system.base.effective_power(), drone_system.base.max_power(), drone.required_power()),
                                 )
                                 .into())
-                                }
-                            } else if ship_manager.power_drone(b.p_drone, 1, true, false) {
-                                if was_deployed {
-                                    Ok(Cow::from("successfully powered the drone").into())
+                                    } else {
+                                        Err(Cow::from(
+                                    format!("the drone system is currently at {}/{} power usage, while the drone requires {} power, you could try powering down other drones", drone_system.base.effective_power(), drone_system.base.max_power(), drone.required_power()),
+                                )
+                                .into())
+                                    }
+                                } else if unsafe {
+                                    ship_manager.power_drone(b.p_drone, 1, true, false)
+                                } {
+                                    if was_deployed {
+                                        Ok(Cow::from("successfully powered the drone").into())
+                                    } else {
+                                        Ok(Cow::from("successfully deployed the drone").into())
+                                    }
                                 } else {
-                                    Ok(Cow::from("successfully deployed the drone").into())
+                                    Err(Cow::from("failed to power the drone").into())
                                 }
+                            } else if unsafe { ship_manager.depower_drone(b.p_drone, true) } {
+                                Ok(Cow::from("successfully depowered the drone").into())
                             } else {
-                                Err(Cow::from("failed to power the drone").into())
+                                Err(Cow::from(
+                                    "couldn't depower the drone, it's probably already depowered",
+                                )
+                                .into())
                             }
-                        } else if ship_manager.depower_drone(b.p_drone, true) {
-                            Ok(Cow::from("successfully depowered the drone").into())
                         } else {
-                            Err(Cow::from(
-                                "couldn't depower the drone, it's probably already depowered",
-                            )
-                            .into())
+                            Err(Cow::from("this drone slot is empty").into())
                         }
-                    } else {
-                        Err(Cow::from("this drone slot is empty").into())
                     }
                 }
-            },
-            FtlActions::ActivateWeapon(_) | FtlActions::DeactivateWeapon(_) => unsafe {
+            }
+            FtlActions::ActivateWeapon(_) | FtlActions::DeactivateWeapon(_) => {
                 let (index, valid, activate) = match action {
                     FtlActions::ActivateWeapon(event) => {
                         (event.weapon_index, self.actions.valid1(&event), true)
@@ -837,9 +915,8 @@ impl neuro_sama::game::GameMut for State {
                 if !valid {
                     Err(Cow::from("can't control a weapon at the time").into())
                 } else {
-                    let cc = &(*(*app).gui).combat_control;
-                    let ship_manager = (*(*app).gui).ship_manager_mut();
-                    let weapon_system = ship_manager.weapon_system();
+                    let ship_manager = app.gui_mut().unwrap().ship_manager_mut().unwrap();
+                    let weapon_system = ship_manager.weapon_system().unwrap();
                     if weapon_system.base.i_lock_count == -1 || weapon_system.base.i_lock_count > 0
                     {
                         Err(Cow::from("the weapon system can't be controlled at the time").into())
@@ -848,82 +925,92 @@ impl neuro_sama::game::GameMut for State {
                             "the weapon system has been hacked and can't be controlled at the time",
                         )
                         .into())
-                    } else if usize::from(index) >= cc.weap_control.base.boxes.len() {
-                        Err(Cow::from("index out of range").into())
-                    } else if let Some(b) = cc
-                        .weap_control
-                        .base
-                        .boxes
-                        .get(index.into())
-                        .map(|x| x.cast::<bindings::WeaponBox>())
-                        .filter(|x| !x.is_null())
-                        .map(|x| &*x)
-                        .filter(|x| !x.p_weapon.is_null())
-                    {
-                        if activate {
-                            if (*b.p_weapon).powered {
-                                Err(Cow::from("this weapon is already powered").into())
-                            } else if (*(*b.p_weapon).blueprint).missiles != 0
-                                && ship_manager.missile_count() == 0
-                            {
-                                Err(Cow::from("you have no missiles left to use this weapon")
-                                    .into())
-                            } else if weapon_system.base.available_power()
-                                < (*b.p_weapon).required_power - (*b.p_weapon).i_bonus_power
-                            {
-                                // not enough power
-                                if weapon_system.base.power_max()
-                                    < (*b.p_weapon).required_power - (*b.p_weapon).i_bonus_power
-                                {
-                                    Err(Cow::from(
-                                    format!("the weapon system is currently at {}/{} power usage, while the weapon requires {} power, you could try upgrading the system to increase max power", weapon_system.base.effective_power(), weapon_system.base.max_power(), (*b.p_weapon).required_power - (*b.p_weapon).i_bonus_power),
-                                )
-                                .into())
-                                } else if weapon_system.base.power_state.second
-                                    - weapon_system.base.power_state.first
-                                    >= (*b.p_weapon).required_power
-                                    && weapon_system.base.damage() > 0
-                                {
-                                    Err(Cow::from(
-                                    format!("the weapon system is currently at {}/{} power usage, while the weapon requires {} power, you could try repairing the system to increase max power", weapon_system.base.effective_power(), weapon_system.base.max_power(), (*b.p_weapon).required_power - (*b.p_weapon).i_bonus_power),
-                                )
-                                .into())
-                                } else {
-                                    Err(Cow::from(
-                                    format!("the weapon system is currently at {}/{} power usage, while the weapon requires {} power, you could try powering down other weapons", weapon_system.base.effective_power(), weapon_system.base.max_power(), (*b.p_weapon).required_power - (*b.p_weapon).i_bonus_power),
-                                )
-                                .into())
-                                }
-                            } else if ship_manager.power_weapon(b.p_weapon, true, false) {
-                                Ok(Cow::from("successfully powered the weapon").into())
-                            } else {
-                                Err(Cow::from("failed to power the weapon").into())
-                            }
-                        } else if ship_manager.depower_weapon(b.p_weapon, true) {
-                            Ok(Cow::from("successfully depowered the weapon").into())
-                        } else {
-                            Err(Cow::from(
-                                "couldn't depower the weapon, it's probably already depowered",
-                            )
-                            .into())
-                        }
                     } else {
-                        Err(Cow::from("this weapon slot is empty").into())
+                        let cc = &app.gui().unwrap().combat_control;
+                        if usize::from(index) >= cc.weap_control.base.boxes.len() {
+                            Err(Cow::from("index out of range").into())
+                        } else if let Some(b) = cc
+                            .weap_control
+                            .base
+                            .boxes
+                            .get(index.into())
+                            .map(|x| x.cast::<bindings::WeaponBox>())
+                            .map(|x| unsafe { xc(x).unwrap() })
+                            .filter(|x| x.weapon().is_some())
+                        {
+                            let ship_manager = app.gui_mut().unwrap().ship_manager_mut().unwrap();
+                            let weapon_system = ship_manager.weapon_system().unwrap();
+                            let weapon = b.weapon().unwrap();
+                            if activate {
+                                if weapon.powered {
+                                    Err(Cow::from("this weapon is already powered").into())
+                                } else if weapon.blueprint().unwrap().missiles != 0
+                                    && ship_manager.missile_count() == 0
+                                {
+                                    Err(Cow::from("you have no missiles left to use this weapon")
+                                        .into())
+                                } else if weapon_system.base.available_power()
+                                    < weapon.required_power - weapon.i_bonus_power
+                                {
+                                    // not enough power
+                                    if weapon_system.base.power_max()
+                                        < weapon.required_power - weapon.i_bonus_power
+                                    {
+                                        Err(Cow::from(
+                                    format!("the weapon system is currently at {}/{} power usage, while the weapon requires {} power, you could try upgrading the system to increase max power", weapon_system.base.effective_power(), weapon_system.base.max_power(), weapon.required_power - weapon.i_bonus_power),
+                                )
+                                .into())
+                                    } else if weapon_system.base.power_state.second
+                                        - weapon_system.base.power_state.first
+                                        >= weapon.required_power
+                                        && weapon_system.base.damage() > 0
+                                    {
+                                        Err(Cow::from(
+                                    format!("the weapon system is currently at {}/{} power usage, while the weapon requires {} power, you could try repairing the system to increase max power", weapon_system.base.effective_power(), weapon_system.base.max_power(), weapon.required_power - weapon.i_bonus_power),
+                                )
+                                .into())
+                                    } else {
+                                        Err(Cow::from(
+                                    format!("the weapon system is currently at {}/{} power usage, while the weapon requires {} power, you could try powering down other weapons", weapon_system.base.effective_power(), weapon_system.base.max_power(), weapon.required_power - weapon.i_bonus_power),
+                                )
+                                .into())
+                                    }
+                                } else if unsafe {
+                                    ship_manager.power_weapon(b.p_weapon, true, false)
+                                } {
+                                    Ok(Cow::from("successfully powered the weapon").into())
+                                } else {
+                                    Err(Cow::from("failed to power the weapon").into())
+                                }
+                            } else if unsafe { ship_manager.depower_weapon(b.p_weapon, true) } {
+                                Ok(Cow::from("successfully depowered the weapon").into())
+                            } else {
+                                Err(Cow::from(
+                                    "couldn't depower the weapon, it's probably already depowered",
+                                )
+                                .into())
+                            }
+                        } else {
+                            Err(Cow::from("this weapon slot is empty").into())
+                        }
                     }
                 }
-            },
-            FtlActions::HackSystem(event) => unsafe {
+            }
+            FtlActions::HackSystem(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't launch a hacking drone at the time").into())
                 } else {
-                    let gui = &mut *(*app).gui;
+                    let gui = app.gui_mut().unwrap();
                     let system = System::from_id(event.system as i32).unwrap();
-                    if gui.combat_control.current_target.is_null() {
-                        Err(Cow::from("can't hack the enemy because there's no enemy").into())
-                    } else {
-                        let target = &mut *(*gui.combat_control.current_target).ship_manager;
+                    if let Some(target) = gui.combat_control.current_target_mut() {
+                        let target = target.ship_manager_mut().unwrap();
                         if let Some(system) = target.system_mut(system) {
-                            let hack = gui.ship_manager_mut().hacking_system_mut();
+                            let system = ptr::addr_of_mut!(*system);
+                            let hack = gui
+                                .ship_manager_mut()
+                                .unwrap()
+                                .hacking_system_mut()
+                                .unwrap();
                             if hack.b_blocked {
                                 Err(Cow::from("can't hack a ship with Zoltan super shields").into())
                             } else if hack.base.i_lock_count == -1 || hack.base.i_lock_count > 0 {
@@ -948,7 +1035,7 @@ impl neuro_sama::game::GameMut for State {
                                 Err(Cow::from("the hacking system is not powered at the moment")
                                     .into())
                             } else {
-                                hack.queued_system = ptr::addr_of_mut!(*system);
+                                hack.queued_system = system;
                                 Ok(Cow::from("successfully launched a drone").into())
                             }
                         } else {
@@ -959,15 +1046,17 @@ impl neuro_sama::game::GameMut for State {
                             ))
                             .into())
                         }
+                    } else {
+                        Err(Cow::from("can't hack the enemy because there's no enemy").into())
                     }
                 }
-            },
-            FtlActions::MindControl(event) => unsafe {
+            }
+            FtlActions::MindControl(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't mind control at the time").into())
                 } else {
-                    let gui = &*(*app).gui;
-                    let mind = (*(*app).gui).ship_manager_mut().mind_system_mut();
+                    let gui = app.gui_mut().unwrap();
+                    let mind = gui.ship_manager_mut().unwrap().mind_system_mut().unwrap();
                     if mind.b_blocked {
                         Err(Cow::from(
                             "mind control is blocked by the enemy ship's Zoltan super shields",
@@ -993,33 +1082,45 @@ impl neuro_sama::game::GameMut for State {
                                 .unwrap(),
                         )
                         .into())
-                    } else if !mind.base.functioning() {
+                    } else if !gui
+                        .ship_manager_mut()
+                        .unwrap()
+                        .mind_system_mut()
+                        .unwrap()
+                        .base
+                        .functioning()
+                    {
                         Err(
                             Cow::from("the mind control system is not powered at the moment")
                                 .into(),
                         )
                     } else {
-                        let ship_manager = gui.ship_manager();
                         let target_ship = match event.target_ship {
-                            TargetShip::Player => ship_manager,
-                            TargetShip::Enemy => {
-                                &*(*gui.combat_control.current_target).ship_manager
-                            }
+                            TargetShip::Player => gui.ship_manager().unwrap(),
+                            TargetShip::Enemy => gui
+                                .combat_control
+                                .current_target()
+                                .unwrap()
+                                .ship_manager()
+                                .unwrap(),
                         };
-                        if let Some(room) = target_ship
+                        let room = target_ship
                             .ship
                             .v_room_list
                             .iter()
-                            .find(|x| (***x).i_room_id == i32::from(event.target_room_id))
-                        {
-                            mind.i_queued_target = (**room).i_room_id;
-                            mind.i_queued_ship = target_ship.i_ship_id;
+                            .map(|x| unsafe { xc(*x).unwrap() })
+                            .find(|x| x.i_room_id == i32::from(event.target_room_id));
+                        if let Some(room) = room {
+                            let ship_id = target_ship.i_ship_id;
                             let c = target_ship
                                 .v_crew_list
                                 .iter()
                                 .copied()
-                                .filter(|x| (**x).i_room_id != (**room).i_room_id)
+                                .filter(|x| unsafe { xc(*x).unwrap() }.i_room_id != room.i_room_id)
                                 .collect::<Vec<_>>();
+                            let mind = gui.ship_manager_mut().unwrap().mind_system_mut().unwrap();
+                            mind.i_queued_target = room.i_room_id;
+                            mind.i_queued_ship = ship_id;
                             let mut b = bindings::Vector::with_capacity(c.len());
                             for x in c {
                                 b.push(x);
@@ -1035,40 +1136,47 @@ impl neuro_sama::game::GameMut for State {
                         }
                     }
                 }
-            },
-            FtlActions::ActivateHacking(event) => unsafe {
+            }
+            FtlActions::ActivateHacking(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't use the hacking drone at the time").into())
                 } else {
-                    let gui = &*(*app).gui;
+                    let gui = app.gui_mut().unwrap();
                     if gui.combat_control.current_target.is_null() {
                         Err(Cow::from("can't hack the enemy because there's no enemy").into())
                     } else {
-                        let hack = (*(*app).gui).ship_manager_mut().hacking_system_mut();
-                        if !hack.b_hacking {
+                        let sys = gui
+                            .ship_manager_mut()
+                            .unwrap()
+                            .hacking_system_mut()
+                            .unwrap();
+                        if !sys.b_hacking {
                             Err(Cow::from("the hacking system is inactive").into())
-                        } else if hack.base.effective_power() == 0 {
+                        } else if sys.base.effective_power() == 0 {
                             Err(Cow::from("the hacking system is unpowered").into())
-                        } else if hack.current_system.is_null() {
+                        } else if sys.current_system().is_none() {
                             Err(Cow::from("the hacking drone hasn't been launched yet").into())
-                        } else if (*hack.current_system).health_state.first == 0 {
+                        } else if sys
+                            .current_system()
+                            .is_some_and(|x| x.health_state.first == 0)
+                        {
                             Err(Cow::from(
                                 "the target system is destroyed so its function can't be disrupted",
                             )
                             .into())
-                        } else if !hack.drone.arrived {
+                        } else if !sys.drone.arrived {
                             Err(
                                 Cow::from("the hacking drone hasn't arrived to the enemy ship yet")
                                     .into(),
                             )
-                        } else if hack.b_blocked {
+                        } else if sys.b_blocked {
                             Err(Cow::from("can't hack a ship with Zoltan super shields").into())
-                        } else if hack.base.i_lock_count == -1 || hack.base.i_lock_count > 0 {
+                        } else if sys.base.i_lock_count == -1 || sys.base.i_lock_count > 0 {
                             Err(
                                 Cow::from("the hacking system can't be controlled at the time")
                                     .into(),
                             )
-                        } else if hack.base.i_hack_effect > 1 {
+                        } else if sys.base.i_hack_effect > 1 {
                             Err(Cow::from(
                                     "the hacking system has been hacked and can't be controlled at the time",
                                 )
@@ -1078,16 +1186,22 @@ impl neuro_sama::game::GameMut for State {
                                     "the hacking system button has not been found, this is probably a bug in the mod",
                                 )
                                 .into());
+                            let sys = ptr::addr_of_mut!(*sys.base.deref_mut());
                             for b in gui.sys_control.sys_boxes.iter() {
-                                if (**b).p_system == ptr::addr_of_mut!(*hack.base.deref_mut()) {
+                                if unsafe { xc(*b).unwrap() }.p_system == sys {
                                     let b = b.cast::<bindings::HackBox>();
-                                    if !(*(*b).current_button).base.b_active {
+                                    let b = unsafe { xm(b).unwrap() };
+                                    if !b.current_button().unwrap().base.b_active {
                                         continue;
                                     }
-                                    (*(*b).current_button).base.b_hover = true;
-                                    (*b).base.base.mouse_hover = false;
-                                    (*(*b).base.base.vtable)
-                                        .mouse_click(ptr::addr_of_mut!((*b).base.base), false);
+                                    b.current_button_mut().unwrap().base.b_hover = true;
+                                    b.base.base.mouse_hover = false;
+                                    unsafe {
+                                        b.base
+                                            .base
+                                            .vtable()
+                                            .mouse_click(ptr::addr_of_mut!(b.base.base), false);
+                                    }
                                     ret = Ok(Cow::from("successfully initiated hacking").into());
                                     break;
                                 }
@@ -1096,13 +1210,17 @@ impl neuro_sama::game::GameMut for State {
                         }
                     }
                 }
-            },
-            FtlActions::ActivateBattery(event) => unsafe {
+            }
+            FtlActions::ActivateBattery(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't use the battery subsystem at the time").into())
                 } else {
-                    let gui = &*(*app).gui;
-                    let sys = (*(*app).gui).ship_manager_mut().battery_system_mut();
+                    let gui = app.gui_mut().unwrap();
+                    let sys = gui
+                        .ship_manager_mut()
+                        .unwrap()
+                        .battery_system_mut()
+                        .unwrap();
                     if sys.b_turned_on {
                         Err(Cow::from("the batery system is already turned on").into())
                     } else if sys.base.i_lock_count == -1 || sys.base.i_lock_count > 0 {
@@ -1120,16 +1238,22 @@ impl neuro_sama::game::GameMut for State {
                             "the battery subsystem button has not been found, this is probably a bug in the mod",
                         )
                         .into());
+                        let sys = ptr::addr_of_mut!(*sys.base.deref_mut());
                         for b in gui.sys_control.sys_boxes.iter() {
-                            if (**b).p_system == ptr::addr_of_mut!(*sys.base.deref_mut()) {
+                            if unsafe { xc(*b).unwrap() }.p_system == sys {
                                 let b = b.cast::<bindings::BatteryBox>();
-                                if !(*b).battery_button.base.b_active {
+                                let b = unsafe { xm(b).unwrap() };
+                                if !b.battery_button.base.b_active {
                                     continue;
                                 }
-                                (*b).battery_button.base.b_hover = true;
-                                (*b).base.base.mouse_hover = false;
-                                (*(*b).base.base.vtable)
-                                    .mouse_click(ptr::addr_of_mut!((*b).base.base), false);
+                                b.battery_button.base.b_hover = true;
+                                b.base.base.mouse_hover = false;
+                                unsafe {
+                                    b.base
+                                        .base
+                                        .vtable()
+                                        .mouse_click(ptr::addr_of_mut!(b.base.base), false);
+                                }
                                 ret = Ok(Cow::from("successfully started the battery").into());
                                 break;
                             }
@@ -1137,13 +1261,13 @@ impl neuro_sama::game::GameMut for State {
                         ret
                     }
                 }
-            },
-            FtlActions::ActivateCloaking(event) => unsafe {
+            }
+            FtlActions::ActivateCloaking(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't use the cloaking system at the time").into())
                 } else {
-                    let gui = &*(*app).gui;
-                    let sys = (*(*app).gui).ship_manager_mut().cloak_system_mut();
+                    let gui = app.gui_mut().unwrap();
+                    let sys = gui.ship_manager_mut().unwrap().cloak_system_mut().unwrap();
                     if sys.b_turned_on {
                         Err(Cow::from("the cloaking system is already turned on").into())
                     } else if sys.base.i_lock_count == -1 || sys.base.i_lock_count > 0 {
@@ -1160,16 +1284,22 @@ impl neuro_sama::game::GameMut for State {
                             "the cloaking system button has not been found, this is probably a bug in the mod",
                         )
                         .into());
+                        let sys = ptr::addr_of_mut!(*sys.base.deref_mut());
                         for b in gui.sys_control.sys_boxes.iter() {
-                            if (**b).p_system == ptr::addr_of_mut!(*sys.base.deref_mut()) {
+                            if unsafe { xc(*b).unwrap() }.p_system == sys {
                                 let b = b.cast::<bindings::CloakingBox>();
-                                if !(*(*b).current_button).base.b_active {
+                                let b = unsafe { xm(b).unwrap() };
+                                if !b.current_button().unwrap().base.b_active {
                                     continue;
                                 }
-                                (*(*b).current_button).base.b_hover = true;
-                                (*b).base.base.mouse_hover = false;
-                                (*(*b).base.base.vtable)
-                                    .mouse_click(ptr::addr_of_mut!((*b).base.base), false);
+                                b.current_button_mut().unwrap().base.b_hover = true;
+                                b.base.base.mouse_hover = false;
+                                unsafe {
+                                    b.base
+                                        .base
+                                        .vtable()
+                                        .mouse_click(ptr::addr_of_mut!(b.base.base), false);
+                                }
                                 ret = Ok(Cow::from("successfully initiated hacking").into());
                                 break;
                             }
@@ -1177,8 +1307,8 @@ impl neuro_sama::game::GameMut for State {
                         ret
                     }
                 }
-            },
-            FtlActions::TeleportSend(_) | FtlActions::TeleportReturn(_) => unsafe {
+            }
+            FtlActions::TeleportSend(_) | FtlActions::TeleportReturn(_) => {
                 let (valid, send, room) = match action {
                     FtlActions::TeleportSend(event) => {
                         (self.actions.valid1(&event), true, event.target_room_id)
@@ -1193,16 +1323,18 @@ impl neuro_sama::game::GameMut for State {
                 if !valid {
                     Err(Cow::from("can't use the teleporter system at the time").into())
                 } else {
-                    let gui = &*(*app).gui;
-                    let sys = (*(*app).gui).ship_manager_mut().teleport_system_mut();
+                    let gui = app.gui_mut().unwrap();
+                    let bypass = gui.equip_screen.has_augment("ZOLTAN_BYPASS");
+                    let sys = gui
+                        .ship_manager_mut()
+                        .unwrap()
+                        .teleport_system_mut()
+                        .unwrap();
                     if send && !sys.b_can_send {
                         Err(Cow::from("the teleporter system can't send crew at the time, probably because there's no enemy ship").into())
                     } else if !send && !sys.b_can_receive {
                         Err(Cow::from("the teleporter system can't receive crew at the time, probably because there's no enemy ship").into())
-                    } else if send
-                        && sys.b_super_shields
-                        && !gui.equip_screen.has_augment("ZOLTAN_BYPASS")
-                    {
+                    } else if send && sys.b_super_shields && !bypass {
                         Err(Cow::from("can't teleport to a ship with Zoltan super shields").into())
                     } else if send && sys.i_prepared_crew == 0 {
                         Err(Cow::from("there's no crew to send in the teleporter room").into())
@@ -1219,15 +1351,15 @@ impl neuro_sama::game::GameMut for State {
                     } else if !sys.base.functioning() {
                         Err(Cow::from("the teleporter system is not powered at the moment").into())
                     } else {
-                        (*(*app).gui).combat_control.teleport_command = bindings::Pair {
+                        gui.combat_control.teleport_command = bindings::Pair {
                             first: room.map(c_int::from).unwrap_or(-1),
                             second: if send { 1 } else { 2 },
                         };
                         Ok(Cow::from("queued the teleporter system command").into())
                     }
                 }
-            },
-            FtlActions::OpenDoors(_) | FtlActions::CloseDoors(_) => unsafe {
+            }
+            FtlActions::OpenDoors(_) | FtlActions::CloseDoors(_) => {
                 let (valid, open, doors, air) = match action {
                     FtlActions::OpenDoors(event) => (
                         self.actions.valid1(&event),
@@ -1244,9 +1376,10 @@ impl neuro_sama::game::GameMut for State {
                 if !valid {
                     Err(Cow::from("can't use the doors system at the time").into())
                 } else {
-                    let gui = &*(*app).gui;
-                    let sys = (*(*app).gui)
+                    let gui = app.gui_mut().unwrap();
+                    let sys = gui
                         .ship_manager_mut()
+                        .unwrap()
                         .system(System::Doors)
                         .unwrap();
                     if sys.i_lock_count == -1 || sys.i_lock_count > 0 {
@@ -1257,17 +1390,19 @@ impl neuro_sama::game::GameMut for State {
                         )
                         .into())
                     } else {
-                        let ship = &gui.ship_manager().ship;
+                        let ship = &gui.ship_manager().unwrap().ship;
                         let all_doors: BTreeMap<c_int, *mut Door> = if air {
                             ship.v_door_list
                                 .iter()
                                 .chain(ship.v_outer_airlocks.iter())
-                                .map(|door| ((**door).i_door_id, *door))
+                                .copied()
+                                .map(|door| (unsafe { xc(door).unwrap() }.i_door_id, door))
                                 .collect()
                         } else {
                             ship.v_door_list
                                 .iter()
-                                .map(|door| ((**door).i_door_id, *door))
+                                .copied()
+                                .map(|door| (unsafe { xc(door).unwrap() }.i_door_id, door))
                                 .collect()
                         };
                         match doors
@@ -1282,25 +1417,28 @@ impl neuro_sama::game::GameMut for State {
                             Ok(doors) => {
                                 if doors.is_empty() {
                                     for door in all_doors.into_values() {
+                                        let door = unsafe { xm(door).unwrap() };
                                         if open {
-                                            (*door).open();
+                                            door.open();
                                         } else {
-                                            (*door).close();
+                                            door.close();
                                         }
                                     }
                                 }
                                 let mut hacked = Vec::new();
                                 for door in &doors {
-                                    if (**door).i_hacked > 0 {
-                                        hacked.push((**door).i_door_id.to_string());
+                                    let door = unsafe { &**door };
+                                    if door.i_hacked > 0 {
+                                        hacked.push(door.i_door_id.to_string());
                                     }
                                 }
                                 if hacked.is_empty() {
                                     for door in doors {
+                                        let door = unsafe { xm(door).unwrap() };
                                         if open {
-                                            (*door).open();
+                                            door.open();
                                         } else {
-                                            (*door).close();
+                                            door.close();
                                         }
                                     }
                                     if open {
@@ -1320,18 +1458,19 @@ impl neuro_sama::game::GameMut for State {
                         }
                     }
                 }
-            },
-            FtlActions::PlanDoorRoute(event) => unsafe {
+            }
+            FtlActions::PlanDoorRoute(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from(
                         "can't control doors at the time, so this action is useless anyway",
                     )
                     .into())
                 } else {
-                    let ship = &(*(*app).gui).ship_manager().ship;
+                    let gui = app.gui().unwrap();
+                    let ship = &gui.ship_manager().unwrap().ship;
                     let mut graph = ShipGraph::default();
                     for door in ship.v_door_list.iter().chain(ship.v_outer_airlocks.iter()) {
-                        let door = &**door;
+                        let door = unsafe { xc(*door).unwrap() };
                         graph.add_door(door.i_door_id, door.i_room1, door.i_room2);
                     }
                     match graph
@@ -1349,8 +1488,8 @@ impl neuro_sama::game::GameMut for State {
                         Err(err) => Err(err),
                     }
                 }
-            },
-            FtlActions::MoveCrew(event) => unsafe {
+            }
+            FtlActions::MoveCrew(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't move crew members at the time").into())
                 } else {
@@ -1358,7 +1497,8 @@ impl neuro_sama::game::GameMut for State {
                         crew_member_indices,
                         room_id,
                     } = event;
-                    let crew = &(*(*app).gui).ship_manager().v_crew_list;
+                    let gui = app.gui().unwrap();
+                    let crew = &gui.ship_manager().unwrap().v_crew_list;
                     match crew_member_indices
                         .into_iter()
                         .map(|x| {
@@ -1374,7 +1514,7 @@ impl neuro_sama::game::GameMut for State {
                             let mut target_ship = None::<TargetShip>;
                             let mut ignore = Vec::new();
                             for (i, c0) in &crew {
-                                let c = &**c0;
+                                let c = unsafe { xc(*c0).unwrap() };
                                 if c.f_stun_time > 0.0
                                     && (c.x - c.current_slot.world_location.x as f32).abs() < 0.5
                                     && (c.y - c.current_slot.world_location.y as f32).abs() < 0.5
@@ -1406,14 +1546,14 @@ impl neuro_sama::game::GameMut for State {
                                     break;
                                 }
                                 target_ship = Some(ship);
-                                crew1.push((i, c0));
+                                crew1.push((i, *c0));
                             }
                             let (target_ship, s) = match target_ship {
                                 Some(TargetShip::Enemy) => (
-                                    &*(*(*(*app).gui).combat_control.current_target).ship_manager,
+                                    gui.combat_control.current_target().unwrap().ship_manager(),
                                     "enemy",
                                 ),
-                                _ => ((*(*app).gui).ship_manager(), "player"),
+                                _ => (gui.ship_manager(), "player"),
                             };
                             if let Some(err) = err {
                                 Err(err)
@@ -1423,21 +1563,28 @@ impl neuro_sama::game::GameMut for State {
                                 )
                                 .into())
                             } else if let Some(room) = target_ship
+                                .unwrap()
                                 .ship
                                 .v_room_list
                                 .iter()
-                                .find(|x| (***x).i_room_id == i32::from(room_id))
+                                .map(|x| unsafe { xc(*x).unwrap() })
+                                .find(|x| x.i_room_id == i32::from(room_id))
                             {
-                                let intruder = (**crew1.first().unwrap().1).intruder();
-                                if ((**room).available_slots(intruder) as usize) < crew1.len() {
+                                let intruder =
+                                    unsafe { xc(crew1.first().unwrap().1).unwrap() }.intruder();
+                                if (room.available_slots(intruder) as usize) < crew1.len() {
                                     Err(Some(Cow::from(format!(
-                                        "room {room_id} only has {} available slots, while you request requires moving {} crew members to the room", (**room).available_slots(intruder), crew1.len()
+                                        "room {room_id} only has {} available slots, while you request requires moving {} crew members to the room", room.available_slots(intruder), crew1.len()
                                     ))))
                                 } else {
                                     let mut yes = Vec::new();
                                     let mut no = Vec::new();
                                     for (i, c) in crew1 {
-                                        if (**c).move_to_room(room_id.into(), -1, false) {
+                                        if unsafe { xm(c).unwrap() }.move_to_room(
+                                            room_id.into(),
+                                            -1,
+                                            false,
+                                        ) {
                                             yes.push(i.to_string());
                                         } else {
                                             no.push(i.to_string());
@@ -1473,12 +1620,13 @@ impl neuro_sama::game::GameMut for State {
                         Err(err) => Err(err),
                     }
                 }
-            },
-            FtlActions::SwapInventorySlots(event) => unsafe {
+            }
+            FtlActions::SwapInventorySlots(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't swap inventory slots at the time").into())
                 } else {
-                    let e = &(*(*app).gui).equip_screen;
+                    let gui = app.gui().unwrap();
+                    let e = &gui.equip_screen;
                     let slots = [event.slot1, event.slot2].map(
                         |actions::InventorySlot {
                              r#type: kind,
@@ -1545,52 +1693,66 @@ impl neuro_sama::game::GameMut for State {
                     );
                     match slots {
                         [Err(err), _] | [_, Err(err)] => Err(err),
-                        [Ok(s1), Ok(s2)] => {
-                            if s1.is_null() || (*s1).item.is_empty() {
+                        [Ok(p1), Ok(p2)] => {
+                            let s1 = unsafe { xm(p1) };
+                            let s2 = unsafe { xm(p2) };
+                            if !s1.as_ref().is_some_and(|x| !x.item.is_empty()) {
                                 Err(Cow::from("slot1 is empty").into())
-                            } else if s2.is_null() || (*s2).item.is_empty() {
+                            } else if !s2.as_ref().is_some_and(|x| !x.item.is_empty()) {
                                 Err(Cow::from("slot2 is empty").into())
+                            } else if p1 == p2 {
+                                Err(Cow::from("slot1 and slot2 are the same").into())
                             } else {
-                                let i1 = &(*s1).item;
-                                let v1 = &*(*s1).vtable;
-                                let i2 = &(*s2).item;
-                                let v2 = &*(*s2).vtable;
-                                if !i1.p_weapon.is_null() && !v2.can_hold_weapon(s2) {
+                                let i1 = unsafe { s1.as_ref().unwrap().item.clone() };
+                                let i2 = unsafe { s2.as_ref().unwrap().item.clone() };
+                                let v1 = s1.as_ref().unwrap().vtable();
+                                let v2 = s2.as_ref().unwrap().vtable();
+                                let s1 = ptr::addr_of_mut!(*s1.unwrap());
+                                let s2 = ptr::addr_of_mut!(*s2.unwrap());
+                                if !i1.p_weapon.is_null() && unsafe { !v2.can_hold_weapon(s2) } {
                                     Err(Cow::from(
                                         "slot1 holds a weapon, but slot2 can't store weapons",
                                     )
                                     .into())
-                                } else if !i2.p_weapon.is_null() && !v1.can_hold_weapon(s1) {
+                                } else if !i2.p_weapon.is_null()
+                                    && unsafe { !v1.can_hold_weapon(s1) }
+                                {
                                     Err(Cow::from(
                                         "slot2 holds a weapon, but slot1 can't store weapons",
                                     )
                                     .into())
-                                } else if !i1.p_drone.is_null() && !v2.can_hold_drone(s2) {
+                                } else if !i1.p_drone.is_null() && unsafe { !v2.can_hold_drone(s2) }
+                                {
                                     Err(Cow::from(
                                         "slot1 holds a drone, but slot2 can't store drones",
                                     )
                                     .into())
-                                } else if !i2.p_drone.is_null() && !v1.can_hold_drone(s1) {
+                                } else if !i2.p_drone.is_null() && unsafe { !v1.can_hold_drone(s1) }
+                                {
                                     Err(Cow::from(
                                         "slot2 holds a drone, but slot1 can't store drones",
                                     )
                                     .into())
-                                } else if !i1.p_crew.is_null() && !v2.can_hold_crew(s2) {
+                                } else if !i1.p_crew.is_null() && unsafe { !v2.can_hold_crew(s2) } {
                                     Err(Cow::from(
                                         "slot1 holds a crew member, but slot2 can't store crew",
                                     )
                                     .into())
-                                } else if !i2.p_crew.is_null() && !v1.can_hold_crew(s1) {
+                                } else if !i2.p_crew.is_null() && unsafe { !v1.can_hold_crew(s1) } {
                                     Err(Cow::from(
                                         "slot2 holds a crew member, but slot1 can't store crew",
                                     )
                                     .into())
-                                } else if !i1.augment.is_null() && !v2.can_hold_augment(s2) {
+                                } else if !i1.augment.is_null()
+                                    && unsafe { !v2.can_hold_augment(s2) }
+                                {
                                     Err(Cow::from(
                                         "slot1 holds a augment, but slot2 can't store augments",
                                     )
                                     .into())
-                                } else if !i2.augment.is_null() && !v1.can_hold_augment(s1) {
+                                } else if !i2.augment.is_null()
+                                    && unsafe { !v1.can_hold_augment(s1) }
+                                {
                                     Err(Cow::from(
                                         "slot2 holds a augment, but slot1 can't store augments",
                                     )
@@ -1600,56 +1762,61 @@ impl neuro_sama::game::GameMut for State {
                                 } else if i2.is_empty() {
                                     Err(Cow::from("slot2 holds no items").into())
                                 } else {
-                                    let i1 = *i1;
-                                    let i2 = *i2;
-                                    v1.remove_item(s1);
-                                    v2.remove_item(s2);
-                                    v1.add_item(s1, i1);
-                                    v2.add_item(s2, i2);
+                                    unsafe {
+                                        v1.remove_item(s1);
+                                        v2.remove_item(s2);
+                                        v1.add_item(s1, i1);
+                                        v2.add_item(s2, i2);
+                                    }
                                     Ok(Cow::from("successfully swapped the slots").into())
                                 }
                             }
                         }
                     }
                 }
-            },
-            FtlActions::Back(event) => unsafe {
+            }
+            FtlActions::Back(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't go back at the time").into())
                 } else {
-                    let gui = (*app).gui;
-                    if (*gui).store_screens.base.b_open {
-                        (*gui).store_screens.close();
+                    let gui = app.gui_mut().unwrap();
+                    if gui.store_screens.base.b_open {
+                        gui.store_screens.close();
                         Ok(Cow::from("closed the store").into())
-                    } else if (*(*gui).star_map).base.b_open {
-                        if (*(*gui).star_map).b_choosing_new_sector {
-                            (*(*gui).star_map).b_choosing_new_sector = false;
+                    } else if gui.star_map().unwrap().base.b_open {
+                        let star_map = gui.star_map_mut().unwrap();
+                        if star_map.b_choosing_new_sector {
+                            star_map.b_choosing_new_sector = false;
                             Ok(Cow::from("closed next sector selection").into())
                         } else {
-                            (*(*(*gui).star_map).base.vtable)
-                                .close(ptr::addr_of_mut!((*(*gui).star_map).base));
+                            unsafe {
+                                star_map
+                                    .base
+                                    .vtable()
+                                    .close(ptr::addr_of_mut!(star_map.base));
+                            }
                             Ok(Cow::from("closed the starmap").into())
                         }
-                    } else if (*gui).ship_screens.base.b_open {
-                        (*gui).ship_screens.close();
+                    } else if gui.ship_screens.base.b_open {
+                        gui.ship_screens.close();
                         Ok(Cow::from("closed the ship overview").into())
                     } else {
                         Err(Cow::from("nothing to close").into())
                     }
                 }
-            },
-            FtlActions::ShipOverview(event) => unsafe {
+            }
+            FtlActions::ShipOverview(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't open the ship overview at the time").into())
                 } else {
-                    let gui = (*app).gui;
-                    if (*gui).danger_location {
+                    let gui = app.gui_mut().unwrap();
+                    if gui.danger_location {
                         Err(Cow::from(
                             "can't open the ship overview at the time because of the enemy ship",
                         )
                         .into())
-                    } else if !(*gui).upgrade_screen.base.b_open {
-                        (*gui).ship_screens.open();
+                    } else if !gui.upgrade_screen.base.b_open {
+                        gui.ship_screens.open();
                         Ok(Cow::from("successfully opened ship overview").into())
                     } else {
                         Err(
@@ -1658,65 +1825,70 @@ impl neuro_sama::game::GameMut for State {
                         )
                     }
                 }
-            },
-            FtlActions::UpgradeSystem(event) => unsafe {
+            }
+            FtlActions::UpgradeSystem(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't upgrade ship systems at the time").into())
                 } else {
                     let system = event.system;
-                    let upgrades = &mut (*(*app).gui).upgrade_screen;
+                    let gui = app.gui_mut().unwrap();
+                    let upgrades = &mut gui.upgrade_screen;
                     match system {
                         actions::SystemName::Reactor => {
-                            let btn = &mut upgrades.reactor_button;
-                            let cost = btn.reactor_cost();
-                            let scrap = (*upgrades.ship_manager).current_scrap;
+                            let cost = upgrades.reactor_button.reactor_cost();
+                            let scrap = upgrades.ship_manager().unwrap().current_scrap;
                             if cost > scrap {
                                 Err(Cow::from(format!(
                                     "the reactor upgrade costs {cost} scrap, you only have {scrap}"
                                 ))
                                 .into())
-                            } else if power_manager((*upgrades.ship_manager).i_ship_id)
+                            } else if power_manager(upgrades.ship_manager().unwrap().i_ship_id)
                                 .is_some_and(|x| x.current_power.second > 24)
                             {
                                 Err(Cow::from("the reactor is already at max power (24)").into())
                             } else {
+                                let btn = &mut upgrades.reactor_button;
                                 btn.base.base.b_hover = true;
-                                (*btn.base.base.vtable).on_click(ptr::addr_of_mut!(btn.base.base));
+                                unsafe {
+                                    btn.base
+                                        .base
+                                        .vtable()
+                                        .on_click(ptr::addr_of_mut!(btn.base.base));
+                                }
                                 Ok(Cow::from("successfully updated the reactor").into())
                             }
                         }
                         system => {
-                            if let Some(b) = upgrades
-                                .v_upgrade_boxes
-                                .iter()
-                                .find(|x| {
-                                    !(***x)._sil_do_not_use_system.is_null()
-                                        && (*(***x)._sil_do_not_use_system).i_system_type
-                                            == system as i32
-                                })
-                                .copied()
-                            {
-                                if (*(*b)._sil_do_not_use_system).power_state.second
-                                    + (*b).temp_upgrade
-                                    < (*(*b)._sil_do_not_use_system).max_level
+                            if let Some(c) = upgrades.v_upgrade_boxes.iter().copied().find(|x| {
+                                unsafe { xc(*x).unwrap() }
+                                    .system()
+                                    .is_some_and(|x| x.i_system_type == system as i32)
+                            }) {
+                                let b = unsafe { xc(c).unwrap() };
+                                if b.system().unwrap().power_state.second + b.temp_upgrade
+                                    < b.system().unwrap().max_level
                                 {
                                     for b in upgrades.v_upgrade_boxes.iter() {
-                                        (*(**b).current_button).base.b_hover = false;
+                                        let b = unsafe { xm(*b).unwrap() };
+                                        b.current_button_mut().unwrap().base.b_hover = false;
                                     }
-                                    (*(*b).current_button).base.b_hover = true;
+                                    let b = unsafe { xm(c).unwrap() };
+                                    b.current_button_mut().unwrap().base.b_hover = true;
                                     upgrades.base.b_close_button_selected = false;
                                     upgrades.undo_button.base.b_hover = false;
                                     upgrades.reactor_button.base.base.b_hover = false;
-                                    (*upgrades.base.vtable).mouse_click(
-                                        ptr::addr_of_mut!(upgrades.base),
-                                        0,
-                                        0,
-                                    );
+                                    unsafe {
+                                        upgrades.base.vtable().mouse_click(
+                                            ptr::addr_of_mut!(upgrades.base),
+                                            0,
+                                            0,
+                                        );
+                                    }
                                     Err(Cow::from("successfully upgraded the system").into())
                                 } else {
                                     Err(Cow::from(format!(
                                         "the system is already at max level ({})",
-                                        (*(*b)._sil_do_not_use_system).max_level
+                                        b.system().unwrap().max_level
                                     ))
                                     .into())
                                 }
@@ -1726,37 +1898,48 @@ impl neuro_sama::game::GameMut for State {
                         }
                     }
                 }
-            },
-            FtlActions::UndoUpgrades(event) => unsafe {
+            }
+            FtlActions::UndoUpgrades(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't undo the ship upgrades at the time").into())
                 } else {
-                    let upgrades = &mut (*(*app).gui).upgrade_screen;
+                    let gui = app.gui_mut().unwrap();
+                    let upgrades = &mut gui.upgrade_screen;
                     upgrades.undo_button.base.b_hover = true;
-                    (*upgrades.undo_button.base.vtable)
-                        .on_click(ptr::addr_of_mut!(upgrades.undo_button.base));
+                    unsafe {
+                        upgrades
+                            .undo_button
+                            .base
+                            .vtable()
+                            .on_click(ptr::addr_of_mut!(upgrades.undo_button.base));
+                    }
                     Ok(Cow::from("ship upgrades undone").into())
                 }
-            },
-            FtlActions::FireCrew(event) => unsafe {
+            }
+            FtlActions::FireCrew(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't fire crew members at the time").into())
                 } else {
-                    let crew = &mut (*(*app).gui).crew_screen;
-                    if let Some(c) = (*(*app).gui)
+                    let gui = app.gui_mut().unwrap();
+                    if let Some(c) = gui
                         .ship_manager()
+                        .unwrap()
                         .v_crew_list
                         .get(event.crew_member_index.into())
                         .copied()
                     {
+                        let crew = &mut gui.crew_screen;
                         if let Some(cc) = crew
                             .crew_boxes
                             .iter()
-                            .find(|x| !(***x).base.item.is_empty() && (***x).base.item.p_crew == c)
+                            .map(|x| unsafe { xm(*x).unwrap() })
+                            .find(|x| !x.base.item.is_empty() && x.base.item.p_crew == c)
                         {
-                            if (**cc).b_show_delete {
+                            if cc.b_show_delete {
                                 // TODO: set b_confirm_delete, switch to actions::{Accept, Deny}
-                                (*(**cc).base.vtable).remove_item(ptr::addr_of_mut!((**cc).base));
+                                unsafe {
+                                    cc.base.vtable().remove_item(ptr::addr_of_mut!(cc.base));
+                                }
                                 Ok(Cow::from("fired the crew member o7").into())
                             } else {
                                 Err(Cow::from("can't delete the crew member").into())
@@ -1771,29 +1954,33 @@ impl neuro_sama::game::GameMut for State {
                         Err(Cow::from("crew member out of range").into())
                     }
                 }
-            },
-            FtlActions::Jump(event) => unsafe {
+            }
+            FtlActions::Jump(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't jump to a different star system at the time").into())
                 } else {
-                    let s = &mut *(*(*app).gui).star_map;
-                    let loc = &*s.current_loc;
+                    let gui = app.gui_mut().unwrap();
+                    let s = gui.star_map_mut().unwrap();
+                    let loc = s.current_loc().unwrap();
                     let locs = loc.neighbors();
                     if let Some(path) = locs.get(&event.direction) {
                         s.potential_loc = *path;
                         s.ready_to_travel = true;
-                        (*s.base.vtable).close(ptr::addr_of_mut!(s.base));
+                        unsafe {
+                            s.base.vtable().close(ptr::addr_of_mut!(s.base));
+                        }
                         Ok(Cow::from("jumping...").into())
                     } else {
                         Err(Cow::from("there's no path in the direction you've chosen").into())
                     }
                 }
-            },
-            FtlActions::Starmap(event) => unsafe {
+            }
+            FtlActions::Starmap(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't open the starmap").into())
                 } else {
-                    let ship = (*(*app).gui).ship_manager();
+                    let gui = app.gui_mut().unwrap();
+                    let ship = gui.ship_manager().unwrap();
                     if !ship
                         .system(System::Engines)
                         .is_some_and(|x| x.functioning())
@@ -1804,56 +1991,67 @@ impl neuro_sama::game::GameMut for State {
                     } else if ship.jump_timer.first < ship.jump_timer.second {
                         Err(Cow::from("the ship's FTL drive hasn't yet charged").into())
                     } else {
-                        let enemy = (*(*app).gui).enemy_ship;
-                        let leaving_behind = !enemy.is_null() && {
-                            let enemy = &*(*enemy).ship_manager;
+                        let enemy = gui.enemy_ship();
+                        let leaving_behind = enemy.is_some_and(|enemy| {
+                            let enemy = enemy.ship_manager().unwrap();
                             enemy
                                 .v_crew_list
                                 .iter()
-                                .map(|x| &**x)
-                                .filter(|x| {
+                                .map(|x| unsafe { xc(*x).unwrap() })
+                                .filter(|x| unsafe {
                                     x.i_ship_id == 0
                                         && !x.b_dead
-                                        && !(*x.vtable)
+                                        && !x
+                                            .vtable()
                                             .base
                                             .is_drone(ptr::addr_of!(**x).cast_mut().cast())
                                 })
                                 .count()
                                 != 0
-                        };
+                        });
                         if leaving_behind {
-                            let d = &mut (*(*app).gui).leave_crew_dialog;
-                            (*d.base.vtable).open(ptr::addr_of_mut!(d.base));
+                            let d = &mut gui.leave_crew_dialog;
+                            unsafe {
+                                d.base.vtable().open(ptr::addr_of_mut!(d.base));
+                            }
                             Ok(Cow::from("will open the starmap after confirmation").into())
                         } else {
-                            let s = &mut *(*(*app).gui).star_map;
-                            (*s.base.vtable).open(ptr::addr_of_mut!(s.base));
+                            let s = gui.star_map_mut().unwrap();
+                            unsafe {
+                                s.base.vtable().open(ptr::addr_of_mut!(s.base));
+                            }
                             Ok(Cow::from("opened the starmap").into())
                         }
                     }
                 }
-            },
-            FtlActions::Wait(event) => unsafe {
+            }
+            FtlActions::Wait(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't skip your turn at the time").into())
                 } else {
-                    let s = &mut *(*(*app).gui).star_map;
+                    let gui = app.gui_mut().unwrap();
+                    let s = gui.star_map_mut().unwrap();
                     s.close_button.base.b_hover = false;
                     if s.distress_button.state != event.distress_signal {
                         s.distress_button.base.base.b_hover = true;
-                        (*s.base.vtable).mouse_click(ptr::addr_of_mut!(s.base), 0, 0);
+                        unsafe {
+                            s.base.vtable().mouse_click(ptr::addr_of_mut!(s.base), 0, 0);
+                        }
                     }
                     s.distress_button.base.base.b_hover = false;
                     s.wait_button.base.b_hover = true;
-                    (*s.base.vtable).mouse_click(ptr::addr_of_mut!(s.base), 0, 0);
+                    unsafe {
+                        s.base.vtable().mouse_click(ptr::addr_of_mut!(s.base), 0, 0);
+                    }
                     Ok(Cow::from("waiting...").into())
                 }
-            },
-            FtlActions::NextSector(event) => unsafe {
+            }
+            FtlActions::NextSector(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't go to the next sector at the time").into())
                 } else {
-                    let s = &mut *(*(*app).gui).star_map;
+                    let gui = app.gui_mut().unwrap();
+                    let s = gui.star_map_mut().unwrap();
                     if s.b_secret_sector {
                         s.close_button.base.b_hover = false;
                         s.distress_button.base.base.b_hover = false;
@@ -1869,13 +2067,14 @@ impl neuro_sama::game::GameMut for State {
                         Ok(Cow::from("opened next sector selection").into())
                     }
                 }
-            },
-            FtlActions::ChooseNextSector(event) => unsafe {
+            }
+            FtlActions::ChooseNextSector(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't choose the next sector at the time").into())
                 } else {
-                    let s = &mut *(*(*app).gui).star_map;
-                    let sec = &*s.current_sector;
+                    let gui = app.gui_mut().unwrap();
+                    let s = gui.star_map_mut().unwrap();
+                    let sec = s.current_sector().unwrap();
                     let secs = sec.neighbors();
                     if let Some(path) = secs.get(&event.direction) {
                         s.final_sector_choice = s
@@ -1885,44 +2084,59 @@ impl neuro_sama::game::GameMut for State {
                             .find(|(_, x)| **x == *path)
                             .unwrap()
                             .0 as i32;
-                        (*s.base.vtable).close(ptr::addr_of_mut!(s.base));
+                        unsafe {
+                            s.base.vtable().close(ptr::addr_of_mut!(s.base));
+                        }
                         Ok(Cow::from("jumping...").into())
                     } else {
                         Err(Cow::from("there's no path in the direction you've chosen").into())
                     }
                 }
-            },
-            FtlActions::OpenStore(event) => unsafe {
+            }
+            FtlActions::OpenStore(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't open the store at the time").into())
                 } else {
-                    (*(*app).gui).store_screens.open();
+                    let gui = app.gui_mut().unwrap();
+                    gui.store_screens.open();
                     Ok(Cow::from("successfully opened the store").into())
                 }
-            },
-            FtlActions::BuyScreen(event) => unsafe {
+            }
+            FtlActions::BuyScreen(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't switch to the buy screen at the time").into())
                 } else {
-                    let store = &mut (*(*app).gui).store_screens;
-                    store.set_tab(0);
+                    let gui = app.gui_mut().unwrap();
+                    let store = &mut gui.store_screens;
+                    unsafe {
+                        store.set_tab(0);
+                    }
                     Ok(Cow::from("successfully opened the buy screen").into())
                 }
-            },
-            FtlActions::SellScreen(event) => unsafe {
+            }
+            FtlActions::SellScreen(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't switch to the sell screen at the time").into())
                 } else {
-                    let store = &mut (*(*app).gui).store_screens;
-                    store.set_tab(1);
+                    let gui = app.gui_mut().unwrap();
+                    let store = &mut gui.store_screens;
+                    unsafe {
+                        store.set_tab(1);
+                    }
                     Ok(Cow::from("successfully opened the sell screen").into())
                 }
-            },
-            FtlActions::SwitchStorePage(event) => unsafe {
+            }
+            FtlActions::SwitchStorePage(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't switch store pages at the time").into())
                 } else {
-                    let store = &mut *(*(*(*app).world).base_location_event).p_store;
+                    let store = app
+                        .world_mut()
+                        .unwrap()
+                        .base_location_event_mut()
+                        .unwrap()
+                        .store_mut()
+                        .unwrap();
                     store.b_show_page2 = !store.b_show_page2;
                     store.current_button = if store.b_show_page2 {
                         ptr::addr_of_mut!(store.page2)
@@ -1931,12 +2145,13 @@ impl neuro_sama::game::GameMut for State {
                     };
                     Ok(Cow::from("successfully switched the store page").into())
                 }
-            },
-            FtlActions::Sell(event) => unsafe {
+            }
+            FtlActions::Sell(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't sell ites at the time, try opening the shop or switching to the sell tab").into())
                 } else {
-                    let e = &mut (*(*app).gui).equip_screen;
+                    let gui = app.gui_mut().unwrap();
+                    let e = &mut gui.equip_screen;
                     let actions::InventorySlot {
                         r#type: kind,
                         index,
@@ -2003,20 +2218,22 @@ impl neuro_sama::game::GameMut for State {
                                 .find(|(_, x)| **x == slot)
                                 .unwrap()
                                 .0 as i32;
-                            (*e.base.vtable).mouse_up(ptr::addr_of_mut!(e.base), 0, 0);
+                            unsafe {
+                                e.base.vtable().mouse_up(ptr::addr_of_mut!(e.base), 0, 0);
+                            }
                             e.b_dragging = false;
                             Ok(Cow::from("successfully sold the item").into())
                         }
                     }
                 }
-            },
+            }
             FtlActions::BuyDrone(_)
             | FtlActions::BuySystem(_)
             | FtlActions::BuyWeapon(_)
             | FtlActions::BuyConsumable(_)
             | FtlActions::BuyAugmentation(_)
             | FtlActions::Repair1(_)
-            | FtlActions::RepairAll(_) => unsafe {
+            | FtlActions::RepairAll(_) => {
                 let (valid, kind, index) = match &action {
                     FtlActions::BuyDrone(event) => {
                         (self.actions.valid1(event), StoreType::Drones, event.index)
@@ -2046,49 +2263,67 @@ impl neuro_sama::game::GameMut for State {
                         Err(Cow::from(format!("can't buy {kind} at the time")).into())
                     }
                 } else {
-                    let store = &mut *(*(*(*app).world).base_location_event).p_store;
+                    let store = app
+                        .world_mut()
+                        .unwrap()
+                        .base_location_event_mut()
+                        .unwrap()
+                        .store_mut()
+                        .unwrap();
                     let boxes = store.active_boxes_for(kind);
                     let b = match (index, action) {
                         (255, FtlActions::BuySystem(event)) => boxes.iter().find(|x| {
-                            (*x.cast::<bindings::SystemStoreBox>()).type_ == event.system as i32
+                            unsafe { xc(x.cast::<bindings::SystemStoreBox>()).unwrap() }.type_
+                                == event.system as i32
                         }),
                         (255, FtlActions::BuyConsumable(event)) => boxes.iter().find(|x| {
-                            (*(*x.cast::<bindings::ItemStoreBox>()).blueprint)
+                            unsafe { xc(x.cast::<bindings::ItemStoreBox>()).unwrap() }
+                                .blueprint()
+                                .unwrap()
                                 .base
-                                .name
-                                .to_str()
-                                == event.item.blueprint_name()
+                                .type_
+                                == event.item.id()
                         }),
-                        (_, FtlActions::Repair1(_)) => boxes
-                            .iter()
-                            .find(|x| !(*x.cast::<bindings::RepairStoreBox>()).repair_all),
-                        (_, FtlActions::RepairAll(_)) => boxes
-                            .iter()
-                            .find(|x| (*x.cast::<bindings::RepairStoreBox>()).repair_all),
+                        (_, FtlActions::Repair1(_)) => boxes.iter().find(|x| {
+                            !unsafe { xc(x.cast::<bindings::RepairStoreBox>()).unwrap() }.repair_all
+                        }),
+                        (_, FtlActions::RepairAll(_)) => boxes.iter().find(|x| {
+                            unsafe { xc(x.cast::<bindings::RepairStoreBox>()).unwrap() }.repair_all
+                        }),
                         (index, _) => boxes.get(usize::from(index)),
                     }
                     .copied();
-                    if let Some(b) = b {
-                        if (*b).button.base.b_active {
+                    if let Some(c) = b {
+                        let b = unsafe { xc(c).unwrap() };
+                        if b.button.base.b_active {
                             store.base.b_close_button_selected = false;
-                            (*store.current_button).base.b_hover = false;
+                            store.current_button_mut().unwrap().base.b_hover = false;
                             for b in store.v_store_boxes.iter() {
-                                (**b).button.base.b_hover = false;
+                                let b = unsafe { xm(*b).unwrap() };
+                                b.button.base.b_hover = false;
                             }
-                            (*b).button.base.b_hover = true;
-                            (*store.base.vtable).mouse_click(ptr::addr_of_mut!(store.base), 0, 0);
+                            let b = unsafe { xm(c).unwrap() };
+                            b.button.base.b_hover = true;
+                            unsafe {
+                                store.base.vtable().mouse_click(
+                                    ptr::addr_of_mut!(store.base),
+                                    0,
+                                    0,
+                                );
+                            }
                             if kind == StoreType::Systems
-                                && (*b.cast::<bindings::SystemStoreBox>()).b_confirming
+                                && unsafe { xc(c.cast::<bindings::SystemStoreBox>()).unwrap() }
+                                    .b_confirming
                             {
                                 Ok(Cow::from(format!(
                                     "the purchase requires confirmations. Message: {}",
-                                    (*b.cast::<bindings::SystemStoreBox>())
+                                    unsafe { xc(c.cast::<bindings::SystemStoreBox>()).unwrap() }
                                         .confirm_string
                                         .to_str()
                                 ))
                                 .into())
                             } else if kind == StoreType::None {
-                                let hull = (*store.shopper).ship.hull_integrity;
+                                let hull = store.shopper().unwrap().ship.hull_integrity;
                                 Ok(Cow::from(format!(
                                     "successfully repaired ship hull to {}/{} HP",
                                     hull.first, hull.second
@@ -2104,50 +2339,61 @@ impl neuro_sama::game::GameMut for State {
                         Err(Cow::from("the item you specified was not found").into())
                     }
                 }
-            },
-            FtlActions::Pause(event) => unsafe {
+            }
+            FtlActions::Pause(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't pause the game at the time").into())
                 } else {
-                    (*(*app).gui).b_paused = true;
+                    let gui = app.gui_mut().unwrap();
+                    gui.b_paused = true;
                     Ok(Cow::from("successfully paused the game").into())
                 }
-            },
-            FtlActions::Unpause(event) => unsafe {
+            }
+            FtlActions::Unpause(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't unpause the game at the time").into())
                 } else {
-                    (*(*app).gui).b_paused = false;
+                    let gui = app.gui_mut().unwrap();
+                    gui.b_paused = false;
                     Ok(Cow::from("successfully unpaused the game").into())
                 }
-            },
-            FtlActions::SystemsScreen(event) => unsafe {
+            }
+            FtlActions::SystemsScreen(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't open the systems screen at the time").into())
                 } else {
-                    let overview = &mut (*(*app).gui).ship_screens;
-                    overview.set_tab(0);
+                    let gui = app.gui_mut().unwrap();
+                    let overview = &mut gui.ship_screens;
+                    unsafe {
+                        overview.set_tab(0);
+                    }
                     Ok(Cow::from("successfully opened the systems screen").into())
                 }
-            },
-            FtlActions::CrewScreen(event) => unsafe {
+            }
+            FtlActions::CrewScreen(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't open the crew screen at the time").into())
                 } else {
-                    let overview = &mut (*(*app).gui).ship_screens;
-                    overview.set_tab(1);
+                    let gui = app.gui_mut().unwrap();
+                    let overview = &mut gui.ship_screens;
+                    unsafe {
+                        overview.set_tab(1);
+                    }
                     Ok(Cow::from("successfully opened the crew screen").into())
                 }
-            },
-            FtlActions::InventoryScreen(event) => unsafe {
+            }
+            FtlActions::InventoryScreen(event) => {
                 if !self.actions.valid1(&event) {
                     Err(Cow::from("can't open the inventory screen at the time").into())
                 } else {
-                    let overview = &mut (*(*app).gui).ship_screens;
-                    overview.set_tab(2);
+                    let gui = app.gui_mut().unwrap();
+                    let overview = &mut gui.ship_screens;
+                    unsafe {
+                        overview.set_tab(2);
+                    }
                     Ok(Cow::from("successfully opened the inventory screen").into())
                 }
-            },
+            }
         };
         if let Some(force) = &mut self.actions.force {
             if ret.is_ok() {
@@ -2185,7 +2431,7 @@ struct ReactorState {
     hacked: bool,
 }
 
-unsafe fn reactor_state(ship_id: i32) -> String {
+fn reactor_state(ship_id: i32) -> String {
     let Some(pow_man) = power_manager(ship_id) else {
         return "{}".to_owned();
     };
@@ -2250,31 +2496,31 @@ impl ActionDb {
     }
 }
 
-unsafe fn available_actions(app: *mut CApp) -> ActionDb {
+fn available_actions(app: &CApp) -> ActionDb {
     let mut ret = ActionDb::default();
-    if (*app).lang_chooser.base.b_open {
+    if app.lang_chooser.base.b_open {
         // language selection is manual, while it's open don't allow neuro to do anything
         return ret;
     }
-    if !(*app).game_logic {
+    if !app.game_logic {
         // if game logic isn't enabled, you can't do anything either
         return ret;
     }
-    if (*app).menu.b_open {
-        if (*app).menu.b_credit_screen {
+    if app.menu.b_open {
+        if app.menu.b_credit_screen {
             ret.add::<actions::SkipCredits>();
             return ret;
         }
-        if (*app).menu.changelog.base.b_open {
+        if app.menu.changelog.base.b_open {
             // changelog is manual
             return ret;
         }
-        if (*app).menu.option_screen.base.base.b_open {
+        if app.menu.option_screen.base.base.b_open {
             // options are manual
             return ret;
         }
-        if (*app).menu.ship_builder.b_open {
-            let s = &(*app).menu.ship_builder;
+        if app.menu.ship_builder.b_open {
+            let s = &app.menu.ship_builder;
             // TODO: (?) difficulty selection actions, enable advanced edition action
             ret.add::<actions::RenameCrew>();
             let mut meta = meta::<actions::RenameCrew>();
@@ -2297,77 +2543,77 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
             ret.add::<actions::StartGame>();
             return ret;
         }
-        if (*app).menu.b_score_screen {
+        if app.menu.b_score_screen {
             // scores are manual
             return ret;
         }
-        if (*app).menu.b_select_save {
-            if (*app).menu.confirm_new_game.base.b_open {
-                if (*app).menu.confirm_new_game.yes_button.base.b_active {
+        if app.menu.b_select_save {
+            if app.menu.confirm_new_game.base.b_open {
+                if app.menu.confirm_new_game.yes_button.base.b_active {
                     ret.add::<actions::Confirm>();
                 }
-                if (*app).menu.confirm_new_game.no_button.base.b_active {
+                if app.menu.confirm_new_game.no_button.base.b_active {
                     ret.add::<actions::Deny>();
                 }
                 ret.force = Some(Force::new(
-                    (*app).menu.confirm_new_game.text.to_str(),
+                    app.menu.confirm_new_game.text.to_str().into_owned(),
                     Duration::from_secs(0),
                 ));
                 return ret;
             }
             return ret;
         }
-        if (*app).menu.start_button.base.b_active {
+        if app.menu.start_button.base.b_active {
             ret.add::<actions::NewGame>();
         }
-        if (*app).menu.continue_button.base.b_active {
+        if app.menu.continue_button.base.b_active {
             ret.add::<actions::Continue>();
         }
         return ret;
     }
     // now, not main menu - command gui
-    let gui = (*app).gui;
-    if (*gui).write_error_dialog.base.b_open {
+    let gui = app.gui().unwrap();
+    if gui.write_error_dialog.base.b_open {
         // idk what this is, require human intervention
         return ret;
     }
-    if (*gui).leave_crew_dialog.base.b_open {
-        if (*gui).leave_crew_dialog.yes_button.base.b_active {
+    if gui.leave_crew_dialog.base.b_open {
+        if gui.leave_crew_dialog.yes_button.base.b_active {
             ret.add::<actions::Confirm>();
         }
-        if (*gui).leave_crew_dialog.no_button.base.b_active {
+        if gui.leave_crew_dialog.no_button.base.b_active {
             ret.add::<actions::Deny>();
         }
         ret.force = Some(Force::new(
-            (*gui).leave_crew_dialog.text.to_str(),
+            gui.leave_crew_dialog.text.to_str().into_owned(),
             Duration::from_secs(0),
         ));
         return ret;
     }
-    if (*gui).game_over_screen.base.b_open {
-        if (*(*app).gui).game_over_screen.b_showing_credits {
+    if gui.game_over_screen.base.b_open {
+        if gui.game_over_screen.b_showing_credits {
             ret.add::<actions::SkipCredits>();
         } else {
             ret.add::<actions::MainMenu>();
         }
         return ret;
     }
-    if (*gui).menu_box.base.b_open {
+    if gui.menu_box.base.b_open {
         // pause menu, always manual *i think*
         return ret;
     }
-    if (*gui).options_box.base.base.b_open {
+    if gui.options_box.base.base.b_open {
         // options menu, always manual
         return ret;
     }
-    if (*(*gui).star_map).base.b_open {
+    if gui.star_map().unwrap().base.b_open {
         ret.add::<actions::Back>();
-        let s = &*(*gui).star_map;
+        let s = gui.star_map().unwrap();
         if s.current_loc.is_null() {
             return ret;
         }
         if s.b_choosing_new_sector {
-            let sec = &*s.current_sector;
+            let sec = s.current_sector().unwrap();
             let secs: HashSet<_> = sec.neighbors().into_keys().map(|x| x.to_str()).collect();
             let mut meta = meta::<actions::ChooseNextSector>();
             match meta
@@ -2388,7 +2634,7 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
             }
             ret.actions.insert(actions::ChooseNextSector::name(), meta);
         } else {
-            let loc = &*s.current_loc;
+            let loc = s.current_loc().unwrap();
             let locs: HashSet<_> = loc.neighbors().into_keys().map(|x| x.to_str()).collect();
             let mut meta = meta::<actions::Jump>();
             match meta
@@ -2414,8 +2660,8 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
         }
         return ret;
     }
-    if (*gui).choice_box.base.b_open {
-        let c = &(*gui).choice_box;
+    if gui.choice_box.base.b_open {
+        let c = &gui.choice_box;
         for (i, choice) in c.choices.iter().enumerate() {
             let (name, mut meta) = match i {
                 0 => (actions::Choose0::name(), meta::<actions::Choose0>()),
@@ -2454,14 +2700,20 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
         ));
         return ret;
     }
-    if (*gui).input_box.base.b_open {
+    if gui.input_box.base.b_open {
         // this is for entering console commands i think? who cares ignore this
         return ret;
     }
-    if (*gui).store_screens.base.b_open {
+    if gui.store_screens.base.b_open {
         // TODO
-        if (*gui).store_screens.current_tab == 0 {
-            let store = &*(*(*(*app).world).base_location_event).p_store;
+        if gui.store_screens.current_tab == 0 {
+            let store = app
+                .world()
+                .unwrap()
+                .base_location_event()
+                .unwrap()
+                .store()
+                .unwrap();
             if store.exit_button.base.b_active {
                 ret.add::<actions::Back>();
             }
@@ -2489,7 +2741,12 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
                     let items: HashSet<_> = boxes
                         .iter()
                         .map(|x| x.cast::<bindings::ItemStoreBox>())
-                        .map(|x| unsafe { (*(*x).blueprint).base.name.to_str() })
+                        .map(|x| unsafe { xc(x).unwrap() })
+                        .map(|x| {
+                            [ItemType::Missiles, ItemType::Fuel, ItemType::DroneParts]
+                                [x.blueprint().unwrap().base.type_ as usize]
+                        })
+                        .map(|x| x.to_str())
                         .collect();
                     x.enum_values
                         .as_mut()
@@ -2501,8 +2758,9 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
                     let systems: HashSet<_> = boxes
                         .iter()
                         .map(|x| x.cast::<bindings::SystemStoreBox>())
-                        .map(|x| unsafe {
-                            System::from_id((*x).type_)
+                        .map(|x| unsafe { xc(x).unwrap() })
+                        .map(|x| {
+                            System::from_id(x.type_)
                                 .map(|x| x.to_string())
                                 .unwrap_or_default()
                         })
@@ -2521,7 +2779,8 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
             meta_for::<bindings::WeaponStoreBox, actions::BuyWeapon>(&mut ret, store);
             meta_for::<bindings::ItemStoreBox, actions::BuyConsumable>(&mut ret, store);
             let boxes = store.active_boxes::<bindings::RepairStoreBox>();
-            if !boxes.is_empty() {
+            let hull = gui.ship_manager().unwrap().ship.hull_integrity;
+            if !boxes.is_empty() && hull.first < hull.second {
                 ret.add::<actions::Repair1>();
                 ret.add::<actions::RepairAll>();
             }
@@ -2532,22 +2791,22 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
         }
         return ret;
     }
-    if (*gui).ship_screens.base.b_open {
-        if (*gui).crew_screen.base.b_open {
-            if (*gui).crew_screen.delete_dialog.base.b_open {
-                if (*gui).crew_screen.delete_dialog.yes_button.base.b_active {
+    if gui.ship_screens.base.b_open {
+        if gui.crew_screen.base.b_open {
+            if gui.crew_screen.delete_dialog.base.b_open {
+                if gui.crew_screen.delete_dialog.yes_button.base.b_active {
                     ret.add::<actions::Confirm>();
                 }
-                if (*gui).crew_screen.delete_dialog.no_button.base.b_active {
+                if gui.crew_screen.delete_dialog.no_button.base.b_active {
                     ret.add::<actions::Deny>();
                 }
                 ret.force = Some(Force::new(
-                    (*gui).crew_screen.delete_dialog.text.to_str(),
+                    gui.crew_screen.delete_dialog.text.to_str().into_owned(),
                     Duration::from_secs(0),
                 ));
                 return ret;
             }
-            let crew_count = (*gui).crew_screen.crew_boxes.len();
+            let crew_count = gui.crew_screen.crew_boxes.len();
             for (name, mut meta) in [
                 // TODO
                 (actions::RenameCrew::name(), meta::<actions::RenameCrew>()),
@@ -2570,19 +2829,24 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
                 ret.actions.insert(name, meta);
             }
         }
-        if (*gui).equip_screen.base.b_open && !(*gui).equip_screen.b_selling_item {
+        if gui.equip_screen.base.b_open && !gui.equip_screen.b_selling_item {
             ret.add::<actions::SwapInventorySlots>();
         }
-        if (*gui).upgrade_screen.base.b_open {
+        if gui.upgrade_screen.base.b_open {
             let mut systems = BTreeSet::new();
-            if (*gui).upgrade_screen.reactor_button.base.base.b_active {
+            if gui.upgrade_screen.reactor_button.base.base.b_active {
                 systems.insert(System::Reactor.to_string());
             }
-            for b in (*gui).upgrade_screen.v_upgrade_boxes.iter().map(|x| &**x) {
+            for b in gui
+                .upgrade_screen
+                .v_upgrade_boxes
+                .iter()
+                .map(|x| unsafe { xc(*x).unwrap() })
+            {
                 if b.blueprint.is_null() {
                     continue;
                 }
-                let Some(sys) = System::from_name(unsafe { (*b.blueprint).name.to_str().as_ref() })
+                let Some(sys) = System::from_name(b.blueprint().unwrap().name.to_str().as_ref())
                 else {
                     continue;
                 };
@@ -2605,50 +2869,52 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
                     .retain(|x| systems.contains(x.as_str().unwrap())),
             }
             ret.actions.insert(actions::UpgradeSystem::name(), meta);
-            if (*gui).upgrade_screen.undo_button.base.b_active {
+            if gui.upgrade_screen.undo_button.base.b_active {
                 ret.add::<actions::UndoUpgrades>();
             }
         }
-        if (*gui).ship_screens.current_tab != 0 {
+        if gui.ship_screens.current_tab != 0 {
             ret.add::<actions::SystemsScreen>();
         }
-        if (*gui).ship_screens.current_tab != 1 {
+        if gui.ship_screens.current_tab != 1 {
             ret.add::<actions::CrewScreen>();
         }
-        if (*gui).ship_screens.current_tab != 2 {
+        if gui.ship_screens.current_tab != 2 {
             ret.add::<actions::InventoryScreen>();
         }
         ret.add::<actions::Back>();
         return ret;
     }
-    if (*(*(*gui).ship_complete).ship_manager).b_jumping {
+    if gui.ship_manager().unwrap().b_jumping {
         // can't do anything if we're currently jumping and no popups are open, just wait
         return ret;
     }
-    if (*gui).b_paused {
+    if gui.b_paused {
         ret.add::<actions::UnpauseGame>();
     } else {
         ret.add::<actions::PauseGame>();
     }
-    if (*gui).ftl_button.base.base.b_active {
+    if gui.ftl_button.base.base.b_active {
         ret.add::<actions::Starmap>();
     }
     // upgrade button (open ship_screens)
-    if (*gui).upgrade_button.base.b_active {
+    if gui.upgrade_button.base.b_active {
         ret.add::<actions::ShipOverview>();
     }
     // store button (open store_screens)
-    if (*gui).store_button.base.b_active {
+    if gui.store_button.base.b_active {
         ret.add::<actions::OpenStore>();
     }
     // options button (open menu_box)
-    // if (*gui).options_button.base.b_active {}
+    // if gui.options_button.base.b_active {}
     // otherwise, no popups are open, so just do normal gameplay things i think idk
     // save crew positions button
-    // if (*gui).crew_control.save_stations.base.b_active {}
+    // if gui.crew_control.save_stations.base.b_active {}
     // load crew positions button
-    // if (*gui).crew_control.return_stations.base.b_active {}
-    let systems: HashMap<String, System> = (*(*gui).sys_control.ship_manager)
+    // if gui.crew_control.return_stations.base.b_active {}
+    let systems: HashMap<String, System> = gui
+        .ship_manager()
+        .unwrap()
         .systems()
         .flat_map(|x| System::from_id(x.i_system_type))
         .map(|x| (x.to_string(), x))
@@ -2677,8 +2943,10 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
         {
             schemars::schema::Schema::Bool(_) => panic!(),
             schemars::schema::Schema::Object(s) => s.enum_values.as_mut().unwrap().retain(|x| {
-                systems.get(x.as_str().unwrap()).is_some_and(|s| unsafe {
-                    (*(*gui).sys_control.ship_manager)
+                systems.get(x.as_str().unwrap()).is_some_and(|s| {
+                    gui.sys_control
+                        .ship_manager()
+                        .unwrap()
                         .system(*s)
                         .is_some_and(|x| x.b_needs_power)
                 })
@@ -2686,8 +2954,13 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
         }
         ret.actions.insert(name, meta);
     }
-    if (*gui).ship_manager().has_system(System::Weapons) {
-        let count = (*gui).ship_manager().weapon_system().slot_count;
+    if gui.ship_manager().unwrap().has_system(System::Weapons) {
+        let count = gui
+            .ship_manager()
+            .unwrap()
+            .weapon_system()
+            .unwrap()
+            .slot_count;
         for (name, mut meta) in [
             (
                 actions::ActivateWeapon::name(),
@@ -2719,8 +2992,13 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
             ret.actions.insert(name, meta);
         }
     }
-    if (*gui).ship_manager().has_system(System::Drones) {
-        let count = (*gui).ship_manager().drone_system().slot_count;
+    if gui.ship_manager().unwrap().has_system(System::Drones) {
+        let count = gui
+            .ship_manager()
+            .unwrap()
+            .drone_system()
+            .unwrap()
+            .slot_count;
         for (name, mut meta) in [
             (
                 actions::ActivateDrone::name(),
@@ -2748,39 +3026,92 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
             ret.actions.insert(name, meta);
         }
     }
-    if (*gui).ship_manager().has_system(System::Hacking) {
-        if !(*gui).ship_manager().hacking_system().b_hacking {
+    if gui.ship_manager().unwrap().has_system(System::Hacking) {
+        if !gui
+            .ship_manager()
+            .unwrap()
+            .hacking_system()
+            .unwrap()
+            .b_hacking
+        {
             ret.add::<actions::HackSystem>();
-        } else if (*gui).ship_manager().hacking_system().base.i_lock_count == 0 {
+        } else if gui
+            .ship_manager()
+            .unwrap()
+            .hacking_system()
+            .unwrap()
+            .base
+            .i_lock_count
+            == 0
+        {
             ret.add::<actions::ActivateHacking>();
         }
     }
-    if (*gui).ship_manager().has_system(System::Mind)
-        && (*gui).ship_manager().mind_system().base.i_lock_count == 0
+    if gui.ship_manager().unwrap().has_system(System::Mind)
+        && gui
+            .ship_manager()
+            .unwrap()
+            .mind_system()
+            .unwrap()
+            .base
+            .i_lock_count
+            == 0
     {
         ret.add::<actions::MindControl>();
     }
-    if (*gui).ship_manager().has_system(System::Battery)
-        && (*gui).ship_manager().battery_system().base.i_lock_count == 0
-        && !(*gui).ship_manager().battery_system().b_turned_on
+    if gui.ship_manager().unwrap().has_system(System::Battery)
+        && gui
+            .ship_manager()
+            .unwrap()
+            .battery_system()
+            .unwrap()
+            .base
+            .i_lock_count
+            == 0
+        && !gui
+            .ship_manager()
+            .unwrap()
+            .battery_system()
+            .unwrap()
+            .b_turned_on
     {
         ret.add::<actions::ActivateBattery>();
     }
-    if (*gui).ship_manager().has_system(System::Cloaking)
-        && (*gui).ship_manager().cloak_system().base.i_lock_count == 0
-        && !(*gui).ship_manager().cloak_system().b_turned_on
+    if gui.ship_manager().unwrap().has_system(System::Cloaking)
+        && gui
+            .ship_manager()
+            .unwrap()
+            .cloak_system()
+            .unwrap()
+            .base
+            .i_lock_count
+            == 0
+        && !gui
+            .ship_manager()
+            .unwrap()
+            .cloak_system()
+            .unwrap()
+            .b_turned_on
     {
         ret.add::<actions::ActivateCloaking>();
     }
-    if (*gui).ship_manager().has_system(System::Teleporter)
-        && (*gui).ship_manager().cloak_system().base.i_lock_count == 0
+    if gui.ship_manager().unwrap().has_system(System::Teleporter)
+        && gui
+            .ship_manager()
+            .unwrap()
+            .cloak_system()
+            .unwrap()
+            .base
+            .i_lock_count
+            == 0
     {
         ret.add::<actions::TeleportSend>();
         ret.add::<actions::TeleportReturn>();
     }
-    if (*gui).ship_manager().has_system(System::Doors)
-        && (*gui)
+    if gui.ship_manager().unwrap().has_system(System::Doors)
+        && gui
             .ship_manager()
+            .unwrap()
             .system(System::Doors)
             .is_some_and(|x| x.i_lock_count == 0)
     {
@@ -2789,7 +3120,7 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
         ret.add::<actions::PlanDoorRoute>();
     }
     ret.add::<actions::MoveCrew>();
-    // (*gui).sys_control.sys_boxes - iterate to get all the systems
+    // gui.sys_control.sys_boxes - iterate to get all the systems
     // 14 MindBox
     // 13 CloneBox
     // 15 HackBox
@@ -2806,69 +3137,71 @@ unsafe fn available_actions(app: *mut CApp) -> ActionDb {
 // useful to hook: WarningMessage::Start or smth
 // game_over.gameover_text, game_over.b_victory
 
-pub unsafe extern "C" fn loop_hook(app: *mut CApp) {
+pub fn loop_hook2(app: &mut CApp) {
     // activated with `l`, very useful for testing
-    (*super::SETTING_VALUES.0).command_console = true;
-    GAME.get_or_init(|| {
-        let (game2ws_tx, mut game2ws_rx) = mpsc::channel(128);
-        let (ws2game_tx, ws2game_rx) = mpsc::channel(128);
-        let state = State {
-            tx: game2ws_tx,
-            rx: ws2game_rx,
-            app: ptr::null_mut(),
-            actions: ActionDb::default(),
-        };
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        std::thread::spawn(move || {
-            rt.block_on(async {
-                loop {
-                    if let Ok((mut ws, _)) = tokio_tungstenite::connect_async(
-                        if let Ok(url) = std::env::var("NEURO_SDK_WS_URL") {
-                            url
-                        } else {
-                            "ws://127.0.0.1:8000".to_owned()
-                        },
-                    )
-                    .await
-                    {
-                        ws2game_tx.send(None).await.expect("ws->game channel closed");
-                        loop {
-                            tokio::select! {
-                                msg = game2ws_rx.recv() => {
-                                    let msg = msg.expect("game->ws channel closed");
-                                    log::info!("game2ws {msg:?}");
-                                    if let Err(err) = ws.send(msg).await {
-                                        log::error!("websocket send failed: {err}");
-                                        break;
-                                    }
-                                }
-                                msg = ws.next() => {
-                                    let Some(msg) = msg else {
-                                        break;
-                                    };
-                                    log::info!("ws2game {msg:?}");
-                                    let msg = match msg {
-                                        Ok(msg) => msg,
-                                        Err(err) => {
-                                            log::error!("receive error: {err}");
-                                            continue;
+    unsafe {
+        (*super::SETTING_VALUES.0).command_console = true;
+        GAME.get_or_init(|| {
+            let (game2ws_tx, mut game2ws_rx) = mpsc::channel(128);
+            let (ws2game_tx, ws2game_rx) = mpsc::channel(128);
+            let state = State {
+                tx: game2ws_tx,
+                rx: ws2game_rx,
+                app: ptr::null_mut(),
+                actions: ActionDb::default(),
+            };
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            std::thread::spawn(move || {
+                rt.block_on(async {
+                    loop {
+                        if let Ok((mut ws, _)) = tokio_tungstenite::connect_async(
+                            if let Ok(url) = std::env::var("NEURO_SDK_WS_URL") {
+                                url
+                            } else {
+                                "ws://127.0.0.1:8000".to_owned()
+                            },
+                        )
+                        .await
+                        {
+                            ws2game_tx.send(None).await.expect("ws->game channel closed");
+                            loop {
+                                tokio::select! {
+                                    msg = game2ws_rx.recv() => {
+                                        let msg = msg.expect("game->ws channel closed");
+                                        log::info!("game2ws {msg:?}");
+                                        if let Err(err) = ws.send(msg).await {
+                                            log::error!("websocket send failed: {err}");
+                                            break;
                                         }
-                                    };
-                                    ws2game_tx.send(Some(msg)).await.expect("ws->game channel closed");
+                                    }
+                                    msg = ws.next() => {
+                                        let Some(msg) = msg else {
+                                            break;
+                                        };
+                                        log::info!("ws2game {msg:?}");
+                                        let msg = match msg {
+                                            Ok(msg) => msg,
+                                            Err(err) => {
+                                                log::error!("receive error: {err}");
+                                                continue;
+                                            }
+                                        };
+                                        ws2game_tx.send(Some(msg)).await.expect("ws->game channel closed");
+                                    }
                                 }
                             }
                         }
+                        log::info!("websocket connection closed, sleeping for 5 seconds");
+                        tokio::time::sleep(Duration::from_secs(5)).await;
                     }
-                    log::info!("websocket connection closed, sleeping for 5 seconds");
-                    tokio::time::sleep(Duration::from_secs(5)).await;
-                }
+                });
             });
+            state
         });
-        state
-    });
+    }
     let game = unsafe { GAME.get_mut().unwrap() };
     game.app = app;
     let actions = available_actions(app);
@@ -2953,4 +3286,9 @@ pub unsafe extern "C" fn loop_hook(app: *mut CApp) {
             log::error!("error starting up: {err}");
         }
     }
+}
+
+pub unsafe extern "C" fn loop_hook(app: *mut CApp) {
+    assert!(!app.is_null());
+    loop_hook2(&mut *app);
 }

@@ -15,6 +15,16 @@ use neuro_ftl_derive::{vtable, TestOffsets};
 
 use crate::game::actions::Direction;
 
+pub unsafe fn xb<'a, T>(x: *const T) -> Option<&'a T> {
+    (!x.is_null()).then(|| &*x)
+}
+pub unsafe fn xc<'a, T>(x: *mut T) -> Option<&'a T> {
+    (!x.is_null()).then(|| &*x)
+}
+pub unsafe fn xm<'a, T>(x: *mut T) -> Option<&'a mut T> {
+    (!x.is_null()).then(|| &mut *x)
+}
+
 // 0 1 5 13 2 3 4 6 7 8 9 10 11 12 14 15 - systems
 // 6 7 8 12 - subsystems
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -308,7 +318,13 @@ pub struct VtableCEvent {
 #[repr(C)]
 #[derive(Debug)]
 pub struct CEvent {
-    pub vtable: *mut VtableCEvent,
+    pub vtable: *const VtableCEvent,
+}
+
+impl CEvent {
+    pub fn vtable(&self) -> &'static VtableCEvent {
+        unsafe { xb(self.vtable).unwrap() }
+    }
 }
 
 #[repr(C)]
@@ -754,6 +770,15 @@ pub struct WorldManager {
     pub original_choice_list: Vector<Choice>,
 }
 
+impl WorldManager {
+    pub fn base_location_event(&self) -> Option<&LocationEvent> {
+        unsafe { xc(self.base_location_event) }
+    }
+    pub fn base_location_event_mut(&mut self) -> Option<&mut LocationEvent> {
+        unsafe { xm(self.base_location_event) }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
 pub struct CApp {
@@ -834,6 +859,21 @@ pub struct CApp {
     pub use_direct3d: bool,
 }
 
+impl CApp {
+    pub fn world(&self) -> Option<&WorldManager> {
+        unsafe { xc(self.world) }
+    }
+    pub fn world_mut(&mut self) -> Option<&mut WorldManager> {
+        unsafe { xm(self.world) }
+    }
+    pub fn gui(&self) -> Option<&CommandGui> {
+        unsafe { xc(self.gui) }
+    }
+    pub fn gui_mut(&mut self) -> Option<&mut CommandGui> {
+        unsafe { xm(self.gui) }
+    }
+}
+
 #[repr(u32)]
 #[derive(Copy, Clone, Debug)]
 pub enum TouchPauseReason {
@@ -883,7 +923,7 @@ pub struct GL_Color {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug)]
+#[derive(Debug)]
 #[allow(non_camel_case_types)]
 pub struct GL_Primitive {
     pub type_: c_int,
@@ -1039,6 +1079,12 @@ pub struct AnimationTracker {
     pub current_delay: c_float,
 }
 
+impl AnimationTracker {
+    pub fn vtable(&self) -> &'static VtableAnimationTracker {
+        unsafe { xb(self.vtable).unwrap() }
+    }
+}
+
 #[vtable]
 pub struct VtableGenericButton {
     pub dtor: Option<fn(*mut GenericButton)>,
@@ -1087,6 +1133,12 @@ pub struct GenericButton {
     pub b_selected: bool,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x4c)]
     pub active_touch: c_int,
+}
+
+impl GenericButton {
+    pub fn vtable(&self) -> &'static VtableGenericButton {
+        unsafe { xb(self.vtable).unwrap() }
+    }
 }
 
 #[repr(C)]
@@ -1363,6 +1415,18 @@ pub struct CompleteShip {
     pub tele_target_room: c_int,
 }
 
+impl CompleteShip {
+    pub fn vtable(&self) -> &'static VtableCompleteShip {
+        unsafe { xb(self.vtable).unwrap() }
+    }
+    pub fn ship_manager(&self) -> Option<&ShipManager> {
+        unsafe { xc(self.ship_manager) }
+    }
+    pub fn ship_manager_mut(&mut self) -> Option<&mut ShipManager> {
+        unsafe { xm(self.ship_manager) }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
 pub struct TimerHelper {
@@ -1435,6 +1499,12 @@ pub struct StoreBox {
     pub push_icon: Point,
 }
 
+impl StoreBox {
+    pub fn vtable(&self) -> &'static VtableStoreBox {
+        unsafe { xb(self.vtable).unwrap() }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
 pub struct WeaponStoreBox {
@@ -1490,6 +1560,12 @@ pub struct ItemStoreBox {
     pub base: StoreBox,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x140)]
     pub blueprint: *const ItemBlueprint,
+}
+
+impl ItemStoreBox {
+    pub fn blueprint(&self) -> Option<&ItemBlueprint> {
+        unsafe { xb(self.blueprint) }
+    }
 }
 
 #[repr(C)]
@@ -1644,6 +1720,15 @@ impl StoreBoxTrait for RepairStoreBox {
 }
 
 impl Store {
+    pub fn shopper(&self) -> Option<&ShipManager> {
+        unsafe { xc(self.shopper) }
+    }
+    pub fn current_button(&self) -> Option<&Button> {
+        unsafe { xc(self.current_button) }
+    }
+    pub fn current_button_mut(&mut self) -> Option<&mut Button> {
+        unsafe { xm(self.current_button) }
+    }
     pub fn active_boxes_for(&self, t: StoreType) -> Vec<*mut StoreBox> {
         match t {
             StoreType::Augments => self
@@ -1706,8 +1791,7 @@ impl Store {
             }
         }
         .copied()
-        .filter(|x| !x.is_null())
-        .filter(|x| T::IGNORE_COUNT || unsafe { (**x).count > 0 })
+        .filter(|x| T::IGNORE_COUNT || unsafe { xc(*x).unwrap() }.count > 0)
         .map(|x| x.cast())
         .collect()
     }
@@ -1773,6 +1857,12 @@ pub struct CachedPrimitive {
     pub primitive: *mut GL_Primitive,
 }
 
+impl CachedPrimitive {
+    pub fn vtable(&self) -> &'static VtableCachedPrimitive {
+        unsafe { xb(self.vtable).unwrap() }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
 pub struct CachedImage {
@@ -1832,6 +1922,12 @@ pub struct WarningMessage {
     pub sound: StdString,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0xc0)]
     pub flash_tracker: AnimationTracker,
+}
+
+impl WarningMessage {
+    pub fn vtable(&self) -> &'static VtableWarningMessage {
+        unsafe { xb(self.vtable).unwrap() }
+    }
 }
 
 #[repr(C)]
@@ -2207,6 +2303,15 @@ pub struct LocationEvent {
     pub secret_sector: bool,
 }
 
+impl LocationEvent {
+    pub fn store(&self) -> Option<&Store> {
+        self.store.then(|| unsafe { xc(self.p_store) }).flatten()
+    }
+    pub fn store_mut(&mut self) -> Option<&mut Store> {
+        self.store.then(|| unsafe { xm(self.p_store) }).flatten()
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
 pub struct Location {
@@ -2256,10 +2361,7 @@ impl Location {
         let x0 = (self.loc.x as u64) / 110;
         let y0 = (self.loc.y as u64) / 110;
         for l in self.connected_locations.iter().copied() {
-            if l.is_null() {
-                continue;
-            }
-            let loc = unsafe { &*l };
+            let loc = unsafe { xc(l).unwrap() };
             let x1 = (loc.loc.x as u64) / 110;
             let y1 = (loc.loc.y as u64) / 110;
             let dir = match (x1.cmp(&x0), y1.cmp(&y0)) {
@@ -2394,8 +2496,11 @@ impl EquipBoxTrait for EquipmentBox {
 // next is overcap, aug overcap
 
 impl Equipment {
+    pub fn ship_manager(&self) -> Option<&ShipManager> {
+        unsafe { xc(self.ship_manager) }
+    }
     pub fn boxes<T: EquipBoxTrait>(&self) -> Vec<*mut EquipmentBox> {
-        let r = T::range(unsafe { &(*self.ship_manager).my_blueprint });
+        let r = T::range(&self.ship_manager().unwrap().my_blueprint);
         self.v_equipment_boxes
             .iter()
             .skip(r.start as usize)
@@ -2405,11 +2510,9 @@ impl Equipment {
     }
     pub fn has_augment(&self, augment: &str) -> bool {
         for b in self.v_equipment_boxes.iter() {
-            unsafe {
-                let b = &**b;
-                if !b.item.augment.is_null() && (*b.item.augment).name.to_str() == augment {
-                    return true;
-                }
+            let b = unsafe { xc(*b).unwrap() };
+            if b.item.augment().is_some_and(|x| x.name.to_str() == augment) {
+                return true;
             }
         }
         false
@@ -2473,7 +2576,7 @@ pub struct VtableEquipmentBox {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, TestOffsets)]
+#[derive(Debug, TestOffsets)]
 pub struct EquipmentBoxItem {
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
     pub p_weapon: *mut ProjectileFactory,
@@ -2486,6 +2589,26 @@ pub struct EquipmentBoxItem {
 }
 
 impl EquipmentBoxItem {
+    pub unsafe fn clone(&self) -> Self {
+        Self {
+            p_weapon: self.p_weapon,
+            p_drone: self.p_drone,
+            p_crew: self.p_crew,
+            augment: self.augment,
+        }
+    }
+    pub fn weapon(&self) -> Option<&ProjectileFactory> {
+        unsafe { xc(self.p_weapon) }
+    }
+    pub fn drone(&self) -> Option<&Drone> {
+        unsafe { xc(self.p_drone) }
+    }
+    pub fn crew(&self) -> Option<&CrewMember> {
+        unsafe { xc(self.p_crew) }
+    }
+    pub fn augment(&self) -> Option<&AugmentBlueprint> {
+        unsafe { xb(self.augment) }
+    }
     pub fn is_empty(&self) -> bool {
         self.p_weapon.is_null()
             && self.p_drone.is_null()
@@ -2539,6 +2662,12 @@ pub struct EquipmentBox {
     pub b_permanent_lock: bool,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0xa1)]
     pub block_detailed: bool,
+}
+
+impl EquipmentBox {
+    pub fn vtable(&self) -> &'static VtableEquipmentBox {
+        unsafe { xb(self.vtable).unwrap() }
+    }
 }
 
 #[repr(C)]
@@ -2636,13 +2765,16 @@ pub struct ReactorButton {
     pub selected: bool,
 }
 
-pub unsafe fn power_manager(ship_id: i32) -> Option<&'static PowerManager> {
-    (*super::POWER_MANAGERS.0).get(ship_id as usize)
+pub fn power_manager(ship_id: i32) -> Option<&'static PowerManager> {
+    unsafe { xc(super::POWER_MANAGERS.0).unwrap() }.get(ship_id as usize)
 }
 
 impl ReactorButton {
+    pub fn ship(&self) -> Option<&ShipManager> {
+        unsafe { xc(self.ship) }
+    }
     pub fn reactor_cost(&self) -> c_int {
-        let Some(power) = (unsafe { power_manager((*self.ship).i_ship_id) }) else {
+        let Some(power) = power_manager(self.ship().unwrap().i_ship_id) else {
             return 0;
         };
         let p = power.current_power.second + self.temp_upgrade;
@@ -2653,7 +2785,7 @@ impl ReactorButton {
         }
     }
     pub fn reactor_refund(&self) -> c_int {
-        let Some(power) = (unsafe { power_manager((*self.ship).i_ship_id) }) else {
+        let Some(power) = power_manager(self.ship().unwrap().i_ship_id) else {
             return 0;
         };
         let p = self.temp_upgrade + power.current_power.second - 1;
@@ -2694,6 +2826,21 @@ pub struct UpgradeBox {
     pub dummy_box: *mut GL_Primitive,
 }
 
+impl UpgradeBox {
+    pub fn blueprint(&self) -> Option<&SystemBlueprint> {
+        unsafe { xb(self.blueprint) }
+    }
+    pub fn current_button(&self) -> Option<&Button> {
+        unsafe { xc(self.current_button) }
+    }
+    pub fn current_button_mut(&mut self) -> Option<&mut Button> {
+        unsafe { xm(self.current_button) }
+    }
+    pub fn system(&self) -> Option<&ShipSystem> {
+        unsafe { xc(self._sil_do_not_use_system) }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
 pub struct Upgrades {
@@ -2716,6 +2863,12 @@ pub struct Upgrades {
     pub system_count: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x2cc)]
     pub force_system_info_width: c_int,
+}
+
+impl Upgrades {
+    pub fn ship_manager(&self) -> Option<&ShipManager> {
+        unsafe { xc(self.ship_manager) }
+    }
 }
 
 #[repr(C)]
@@ -2767,9 +2920,7 @@ impl TabbedWindow {
         }
     }
     pub unsafe fn set_tab(&mut self, tab: c_uint) {
-        unsafe {
-            super::SET_TAB.call(ptr::addr_of_mut!(*self), tab);
-        }
+        super::SET_TAB.call(ptr::addr_of_mut!(*self), tab);
     }
 }
 
@@ -3058,6 +3209,12 @@ pub struct SystemBlueprint {
     pub upgrade_costs: Vector<c_int>,
 }
 
+impl SystemBlueprint {
+    pub fn vtable(&self) -> &'static VtableBlueprint {
+        unsafe { xb(self.vtable).unwrap() }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
 pub struct CAchievement {
@@ -3257,10 +3414,7 @@ impl Sector {
         let x0 = self.location.x;
         let y0 = self.location.y;
         for s in self.neighbors.iter().copied() {
-            if s.is_null() {
-                continue;
-            }
-            let sec = unsafe { &*s };
+            let sec = unsafe { xc(s).unwrap() };
             let x1 = sec.location.x;
             let y1 = sec.location.y;
             let dir = match (x1.cmp(&x0), y1.cmp(&y0)) {
@@ -3542,6 +3696,15 @@ pub struct StarMap {
     pub sector_hit_boxes: Vector<Rect>,
 }
 
+impl StarMap {
+    pub fn current_loc(&self) -> Option<&Location> {
+        unsafe { xc(self.current_loc) }
+    }
+    pub fn current_sector(&self) -> Option<&Sector> {
+        unsafe { xc(self.current_sector) }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
 pub struct SpaceStatus {
@@ -3631,25 +3794,30 @@ pub struct FTLButton {
 }
 
 impl FTLButton {
+    pub fn ship(&self) -> Option<&ShipManager> {
+        unsafe { xc(self.ship) }
+    }
     pub fn mouse_click(&self) -> bool {
         if !self.base.base.b_active {
             return false;
         }
-        if !unsafe {
-            (*self.ship)
-                .system(System::Engines)
-                .is_some_and(|x| x.functioning())
-        } {
+        if !self
+            .ship()
+            .unwrap()
+            .system(System::Engines)
+            .is_some_and(|x| x.functioning())
+        {
             return false;
         }
-        if !unsafe {
-            (*self.ship)
-                .system(System::Pilot)
-                .is_some_and(|x| x.functioning())
-        } {
+        if !self
+            .ship()
+            .unwrap()
+            .system(System::Pilot)
+            .is_some_and(|x| x.functioning())
+        {
             return false;
         }
-        if unsafe { (*self.ship).jump_timer.first < (*self.ship).jump_timer.second } {
+        if self.ship().unwrap().jump_timer.first < self.ship().unwrap().jump_timer.second {
             return false;
         }
         true
@@ -3815,11 +3983,23 @@ pub struct ArmamentBox {
     pub b_ioned: bool,
 }
 
+impl ArmamentBox {
+    pub fn vtable(&self) -> &'static VtableArmamentBox {
+        unsafe { xb(self.vtable).unwrap() }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
 pub struct DroneBox {
     pub base: ArmamentBox,
     pub p_drone: *mut Drone,
+}
+
+impl DroneBox {
+    pub fn drone(&self) -> Option<&Drone> {
+        unsafe { xc(self.p_drone) }
+    }
 }
 
 #[repr(C)]
@@ -3853,6 +4033,12 @@ pub struct WeaponBox {
     pub default_autofire: bool,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x251)]
     pub was_charged: bool,
+}
+
+impl WeaponBox {
+    pub fn weapon(&self) -> Option<&ProjectileFactory> {
+        unsafe { xc(self.p_weapon) }
+    }
 }
 
 #[repr(C)]
@@ -3904,6 +4090,12 @@ pub struct ArmamentControl {
     pub i_flash_slot: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0xc8)]
     pub active_touch: c_int,
+}
+
+impl ArmamentControl {
+    pub fn vtable(&self) -> &'static VtableArmamentControl {
+        unsafe { xb(self.vtable).unwrap() }
+    }
 }
 
 #[repr(C)]
@@ -4039,17 +4231,34 @@ pub struct CombatControl {
 }
 
 impl CombatControl {
-    pub unsafe fn ship_manager(&self) -> &ShipManager {
-        unsafe { &*self.ship_manager }
+    pub fn current_target(&self) -> Option<&CompleteShip> {
+        unsafe { xc(self.current_target) }
     }
-    pub unsafe fn weapons_armed(&self) -> bool {
-        self.ship_manager().has_system(System::Teleporter)
-            && self.ship_manager().teleport_system().i_armed != 0
+    pub fn current_target_mut(&mut self) -> Option<&mut CompleteShip> {
+        unsafe { xm(self.current_target) }
+    }
+    pub fn ship_manager(&self) -> Option<&ShipManager> {
+        unsafe { xc(self.ship_manager) }
+    }
+    pub fn weapons_armed(&self) -> bool {
+        self.ship_manager().unwrap().has_system(System::Teleporter)
+            && self
+                .ship_manager()
+                .unwrap()
+                .teleport_system()
+                .unwrap()
+                .i_armed
+                != 0
             || !self.weap_control.armed_weapon.is_null()
-            || self.ship_manager().has_system(System::Mind)
-                && self.ship_manager().mind_system().i_armed != 0
-            || self.ship_manager().has_system(System::Hacking)
-                && self.ship_manager().hacking_system().b_armed
+            || self.ship_manager().unwrap().has_system(System::Mind)
+                && self.ship_manager().unwrap().mind_system().unwrap().i_armed != 0
+            || self.ship_manager().unwrap().has_system(System::Hacking)
+                && self
+                    .ship_manager()
+                    .unwrap()
+                    .hacking_system()
+                    .unwrap()
+                    .b_armed
     }
 }
 
@@ -4239,6 +4448,12 @@ pub struct SystemBox {
     pub locked_open: bool,
 }
 
+impl SystemBox {
+    pub fn vtable(&self) -> &'static VtableSystemBox {
+        unsafe { xb(self.vtable).unwrap() }
+    }
+}
+
 #[vtable]
 pub struct VtableCooldownSystemBox {
     pub base: VtableSystemBox,
@@ -4303,6 +4518,15 @@ pub struct HackBox {
     pub super_shield_warning: *mut WarningMessage,
 }
 
+impl HackBox {
+    pub fn current_button(&self) -> Option<&Button> {
+        unsafe { xc(self.current_button) }
+    }
+    pub fn current_button_mut(&mut self) -> Option<&mut Button> {
+        unsafe { xm(self.current_button) }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
 pub struct BatteryBox {
@@ -4329,6 +4553,15 @@ pub struct CloakingBox {
     pub cloak_system: *mut CloakingSystem,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x300)]
     pub button_offset: Point,
+}
+
+impl CloakingBox {
+    pub fn current_button(&self) -> Option<&Button> {
+        unsafe { xc(self.current_button) }
+    }
+    pub fn current_button_mut(&mut self) -> Option<&mut Button> {
+        unsafe { xm(self.current_button) }
+    }
 }
 
 #[repr(C)]
@@ -4378,6 +4611,15 @@ pub struct SystemControl {
     pub flash_battery_power: AnimationTracker,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0xd8)]
     pub flash_tracker: AnimationTracker,
+}
+
+impl SystemControl {
+    pub fn ship_manager(&self) -> Option<&ShipManager> {
+        unsafe { xc(self.ship_manager) }
+    }
+    pub fn ship_manager_mut(&mut self) -> Option<&mut ShipManager> {
+        unsafe { xm(self.ship_manager) }
+    }
 }
 
 #[repr(C)]
@@ -4564,6 +4806,12 @@ pub struct ShipObject {
     pub i_ship_id: c_int,
 }
 
+impl ShipObject {
+    pub fn vtable(&self) -> &'static VtableShipObject {
+        unsafe { xb(self.vtable).unwrap() }
+    }
+}
+
 #[vtable]
 pub struct VtableShipObject {
     pub dtor: Option<fn(*mut ShipObject)>,
@@ -4603,6 +4851,12 @@ pub struct Targetable {
     pub targeted: bool,
 }
 
+impl Targetable {
+    pub fn vtable(&self) -> &'static VtableTargetable {
+        unsafe { xb(self.vtable).unwrap() }
+    }
+}
+
 #[vtable]
 pub struct VtableCollideable {
     pub dtor: Option<fn(*mut Collideable)>,
@@ -4625,6 +4879,12 @@ pub struct VtableCollideable {
 #[derive(Debug)]
 pub struct Collideable {
     pub vtable: *const VtableCollideable,
+}
+
+impl Collideable {
+    pub fn vtable(&self) -> &'static VtableCollideable {
+        unsafe { xb(self.vtable).unwrap() }
+    }
 }
 
 #[vtable]
@@ -4797,6 +5057,12 @@ pub struct Drone {
     pub i_hack_level: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x3c)]
     pub hack_time: c_float,
+}
+
+impl Drone {
+    pub fn vtable(&self) -> &'static VtableDrone {
+        unsafe { xb(self.vtable).unwrap() }
+    }
 }
 
 impl Drone {
@@ -5041,6 +5307,12 @@ pub struct Projectile {
     pub color: GL_Color,
 }
 
+impl Projectile {
+    pub fn vtable(&self) -> &'static VtableProjectile {
+        unsafe { xb(self.vtable).unwrap() }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
 pub struct AnimationDescriptor {
@@ -5214,6 +5486,12 @@ pub struct ShipBlueprint {
     pub min_sector: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x240)]
     pub unlock: TextString,
+}
+
+impl ShipBlueprint {
+    pub fn vtable(&self) -> &'static VtableBlueprint {
+        unsafe { xb(self.vtable).unwrap() }
+    }
 }
 
 #[repr(i32)]
@@ -5501,9 +5779,14 @@ pub struct Ship {
 }
 
 impl Ship {
-    pub unsafe fn get_room_blackout(&self, room_id: usize) -> bool {
-        if let Some(room) = self.v_room_list.get(room_id) {
-            !(**room).filled_slots.is_empty()
+    pub fn get_room_blackout(&self, room_id: c_int) -> bool {
+        if let Some(room) = self
+            .v_room_list
+            .iter()
+            .map(|x| unsafe { xc(*x).unwrap() })
+            .find(|room| room.i_room_id == room_id)
+        {
+            !room.filled_slots.is_empty()
         } else {
             false
         }
@@ -5540,6 +5823,12 @@ pub struct Selectable {
     pub vtable: *const VtableSelectable,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x8)]
     pub selected_state: c_int,
+}
+
+impl Selectable {
+    pub fn vtable(&self) -> &'static VtableSelectable {
+        unsafe { xb(self.vtable).unwrap() }
+    }
 }
 
 #[vtable]
@@ -5619,6 +5908,12 @@ pub struct Spreadable {
     pub sound_name: StdString,
 }
 
+impl Spreadable {
+    pub fn vtable(&self) -> &'static VtableSpreadable {
+        unsafe { xb(self.vtable).unwrap() }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
 pub struct Repairable {
@@ -5644,6 +5939,12 @@ pub struct Repairable {
     pub room_id: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x3c)]
     pub i_repair_count: c_int,
+}
+
+impl Repairable {
+    pub fn vtable(&self) -> &'static VtableRepairable {
+        unsafe { xb(self.vtable).unwrap() }
+    }
 }
 
 #[repr(C)]
@@ -5742,6 +6043,12 @@ pub struct CrewTarget {
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
     pub vtable: *const VtableCrewMember,
     pub i_ship_id: c_int,
+}
+
+impl CrewTarget {
+    pub fn vtable(&self) -> &'static VtableCrewMember {
+        unsafe { xb(self.vtable).unwrap() }
+    }
 }
 
 #[repr(C)]
@@ -5970,6 +6277,12 @@ pub struct CrewAnimation {
     pub b_door_target: bool,
 }
 
+impl CrewAnimation {
+    pub fn vtable(&self) -> &'static VtableCrewAnimation {
+        unsafe { xb(self.vtable).unwrap() }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
 pub struct Path {
@@ -6141,6 +6454,12 @@ pub struct CrewMember {
     pub movement_target: CachedImage,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x740)]
     pub b_cloned: bool,
+}
+
+impl CrewMember {
+    pub fn vtable(&self) -> &'static VtableCrewMember {
+        unsafe { xb(self.vtable).unwrap() }
+    }
 }
 
 impl CrewMember {
@@ -6463,8 +6782,11 @@ pub struct ProjectileFactory {
 }
 
 impl ProjectileFactory {
-    pub unsafe fn num_targets_required(&self) -> c_int {
-        if (*self.blueprint).charge_levels > 1 {
+    pub fn blueprint(&self) -> Option<&WeaponBlueprint> {
+        unsafe { xb(self.blueprint) }
+    }
+    pub fn num_targets_required(&self) -> c_int {
+        if self.blueprint().unwrap().charge_levels > 1 {
             self.charge_level.max(1)
         } else {
             self.num_shots
@@ -6674,6 +6996,9 @@ impl HackingSystem {
             && !self.base.completely_destroyed()
             && self.drone.arrived
             && !self.base.locked()
+    }
+    pub fn current_system(&self) -> Option<&ShipSystem> {
+        unsafe { xc(self.current_system) }
     }
 }
 
@@ -7052,6 +7377,12 @@ pub struct ShipSystem {
 }
 
 impl ShipSystem {
+    pub fn vtable(&self) -> &'static VtableShipSystem {
+        unsafe { xb(self.vtable).unwrap() }
+    }
+}
+
+impl ShipSystem {
     pub fn max_power(&self) -> c_int {
         let ret = self.power_state.second
             - (self.health_state.second - self.health_state.first)
@@ -7262,6 +7593,12 @@ pub struct ShipSystemPrime {
     pub damaging_effects: Vector<Animation>,
 }
 
+impl ShipSystemPrime {
+    pub fn vtable(&self) -> &'static VtableShipSystem {
+        unsafe { xb(self.vtable).unwrap() }
+    }
+}
+
 impl Deref for ShipSystemPrime {
     type Target = ShipSystem;
     fn deref(&self) -> &Self::Target {
@@ -7416,123 +7753,130 @@ pub struct ShipManager {
 }
 
 impl ShipManager {
-    pub fn power_drone(
+    pub fn vtable(&self) -> &'static VtableShipManager {
+        unsafe { xb(self.vtable).unwrap() }
+    }
+}
+
+impl ShipManager {
+    pub unsafe fn power_drone(
         &mut self,
         drone: *mut Drone,
         room_id: c_int,
         user_driven: bool,
         force: bool,
     ) -> bool {
-        unsafe {
-            super::POWER_DRONE.call(ptr::addr_of_mut!(*self), drone, room_id, user_driven, force)
-        }
+        super::POWER_DRONE.call(ptr::addr_of_mut!(*self), drone, room_id, user_driven, force)
     }
-    pub fn power_weapon(
+    pub unsafe fn power_weapon(
         &mut self,
         weapon: *mut ProjectileFactory,
         user_driven: bool,
         force: bool,
     ) -> bool {
-        unsafe { super::POWER_WEAPON.call(ptr::addr_of_mut!(*self), weapon, user_driven, force) }
+        super::POWER_WEAPON.call(ptr::addr_of_mut!(*self), weapon, user_driven, force)
     }
-    pub fn depower_drone(&mut self, drone: *mut Drone, user_driven: bool) -> bool {
-        unsafe { super::DEPOWER_DRONE.call(ptr::addr_of_mut!(*self), drone, user_driven) }
+    pub unsafe fn depower_drone(&mut self, drone: *mut Drone, user_driven: bool) -> bool {
+        super::DEPOWER_DRONE.call(ptr::addr_of_mut!(*self), drone, user_driven)
     }
-    pub fn depower_weapon(&mut self, weapon: *mut ProjectileFactory, user_driven: bool) -> bool {
-        unsafe { super::DEPOWER_WEAPON.call(ptr::addr_of_mut!(*self), weapon, user_driven) }
+    pub unsafe fn depower_weapon(
+        &mut self,
+        weapon: *mut ProjectileFactory,
+        user_driven: bool,
+    ) -> bool {
+        super::DEPOWER_WEAPON.call(ptr::addr_of_mut!(*self), weapon, user_driven)
     }
     pub fn has_system(&self, system: System) -> bool {
         match system {
             System::Reactor => true,
-            system => unsafe { *self.system_key.get_ptr(system as usize) != -1 },
+            system => *self.system_key.get(system as usize).unwrap() != -1,
         }
     }
-    pub unsafe fn shield_system(&self) -> &Shields {
-        unsafe { &*self.shield_system }
+    pub fn shield_system(&self) -> Option<&Shields> {
+        unsafe { xc(self.shield_system) }
     }
-    pub unsafe fn engine_system(&self) -> &EngineSystem {
-        unsafe { &*self.engine_system }
+    pub fn engine_system(&self) -> Option<&EngineSystem> {
+        unsafe { xc(self.engine_system) }
     }
-    pub unsafe fn oxygen_system(&self) -> &OxygenSystem {
-        unsafe { &*self.oxygen_system }
+    pub fn oxygen_system(&self) -> Option<&OxygenSystem> {
+        unsafe { xc(self.oxygen_system) }
     }
-    pub unsafe fn weapon_system(&self) -> &WeaponSystem {
-        unsafe { &*self.weapon_system }
+    pub fn weapon_system(&self) -> Option<&WeaponSystem> {
+        unsafe { xc(self.weapon_system) }
     }
-    pub unsafe fn drone_system(&self) -> &DroneSystem {
-        unsafe { &*self.drone_system }
+    pub fn drone_system(&self) -> Option<&DroneSystem> {
+        unsafe { xc(self.drone_system) }
     }
-    pub unsafe fn medbay_system(&self) -> &MedbaySystem {
-        unsafe { &*self.medbay_system }
+    pub fn medbay_system(&self) -> Option<&MedbaySystem> {
+        unsafe { xc(self.medbay_system) }
     }
-    pub unsafe fn teleport_system(&self) -> &TeleportSystem {
-        unsafe { &*self.teleport_system }
+    pub fn teleport_system(&self) -> Option<&TeleportSystem> {
+        unsafe { xc(self.teleport_system) }
     }
-    pub unsafe fn teleport_system_mut(&mut self) -> &mut TeleportSystem {
-        unsafe { &mut *self.teleport_system }
+    pub fn teleport_system_mut(&mut self) -> Option<&mut TeleportSystem> {
+        unsafe { xm(self.teleport_system) }
     }
-    pub unsafe fn cloak_system(&self) -> &CloakingSystem {
-        unsafe { &*self.cloak_system }
+    pub fn cloak_system(&self) -> Option<&CloakingSystem> {
+        unsafe { xc(self.cloak_system) }
     }
-    pub unsafe fn cloak_system_mut(&mut self) -> &mut CloakingSystem {
-        unsafe { &mut *self.cloak_system }
+    pub fn cloak_system_mut(&mut self) -> Option<&mut CloakingSystem> {
+        unsafe { xm(self.cloak_system) }
     }
-    pub unsafe fn artillery_systems(&self) -> impl Iterator<Item = &ArtillerySystem> {
-        self.artillery_systems.iter().map(|x| unsafe { &**x })
+    pub fn artillery_systems(&self) -> impl Iterator<Item = &ArtillerySystem> {
+        self.artillery_systems
+            .iter()
+            .map(|x| unsafe { xc(*x).unwrap() })
     }
-    pub unsafe fn battery_system(&self) -> &BatterySystem {
-        unsafe { &*self.battery_system }
+    pub fn battery_system(&self) -> Option<&BatterySystem> {
+        unsafe { xc(self.battery_system) }
     }
-    pub unsafe fn battery_system_mut(&mut self) -> &mut BatterySystem {
-        unsafe { &mut *self.battery_system }
+    pub fn battery_system_mut(&mut self) -> Option<&mut BatterySystem> {
+        unsafe { xm(self.battery_system) }
     }
-    pub unsafe fn clone_system(&self) -> &CloneSystem {
-        unsafe { &*self.clone_system }
+    pub fn clone_system(&self) -> Option<&CloneSystem> {
+        unsafe { xc(self.clone_system) }
     }
-    pub unsafe fn mind_system(&self) -> &MindSystem {
-        unsafe { &*self.mind_system }
+    pub fn mind_system(&self) -> Option<&MindSystem> {
+        unsafe { xc(self.mind_system) }
     }
-    pub unsafe fn mind_system_mut(&mut self) -> &mut MindSystem {
-        unsafe { &mut *self.mind_system }
+    pub fn mind_system_mut(&mut self) -> Option<&mut MindSystem> {
+        unsafe { xm(self.mind_system) }
     }
-    pub unsafe fn hacking_system(&self) -> &HackingSystem {
-        unsafe { &*self.hacking_system }
+    pub fn hacking_system(&self) -> Option<&HackingSystem> {
+        unsafe { xc(self.hacking_system) }
     }
-    pub unsafe fn hacking_system_mut(&mut self) -> &mut HackingSystem {
-        unsafe { &mut *self.hacking_system }
+    pub fn hacking_system_mut(&mut self) -> Option<&mut HackingSystem> {
+        unsafe { xm(self.hacking_system) }
     }
     pub fn system(&self, system: System) -> Option<&ShipSystem> {
-        let key = unsafe { *self.system_key.get_ptr(system as usize) };
-        (key >= 0)
-            .then(|| self.v_system_list.get_ptr(key as usize))
-            .and_then(|x| (!x.is_null()).then(|| unsafe { *x }))
-            .map(|x| unsafe { &*x })
+        let key = *self.system_key.get(system as usize).unwrap();
+        (key >= 0).then(|| unsafe { xc(*self.v_system_list.get(key as usize).unwrap()).unwrap() })
     }
     pub fn system_mut(&mut self, system: System) -> Option<&mut ShipSystem> {
-        let key = unsafe { *self.system_key.get_ptr(system as usize) };
-        (key >= 0)
-            .then(|| self.v_system_list.get_ptr(key as usize))
-            .and_then(|x| (!x.is_null()).then(|| unsafe { *x }))
-            .map(|x| unsafe { &mut *x })
+        let key = *self.system_key.get(system as usize).unwrap();
+        (key >= 0).then(|| unsafe { xm(*self.v_system_list.get(key as usize).unwrap()).unwrap() })
     }
     pub fn systems(&self) -> impl Iterator<Item = &ShipSystem> {
-        self.v_system_list.iter().map(|x| unsafe { &**x })
+        self.v_system_list
+            .iter()
+            .map(|x| unsafe { xc(*x).unwrap() })
     }
     pub fn has_crew(&self, name: &str) -> bool {
         self.v_crew_list
             .iter()
-            .any(|x| unsafe { !(**x).b_dead && (**x).blueprint.name.to_str() == name })
+            .map(|x| unsafe { xc(*x).unwrap() })
+            .any(|x| !x.b_dead && x.blueprint.name.to_str() == name)
     }
     pub fn drone_count(&self) -> c_int {
         if self.has_system(System::Drones) {
-            unsafe { self.drone_system().drone_count }
+            self.drone_system().unwrap().drone_count
         } else {
             self.temp_drone_count
         }
     }
     pub fn missile_count(&self) -> c_int {
         if self.has_system(System::Weapons) {
-            unsafe { self.weapon_system().missile_count }
+            self.weapon_system().unwrap().missile_count
         } else {
             self.temp_missile_count
         }
@@ -7822,20 +8166,26 @@ pub struct CommandGui {
 }
 
 impl CommandGui {
-    pub unsafe fn ship_manager(&self) -> &ShipManager {
-        &*self.crew_control.ship_manager
+    pub fn enemy_ship(&self) -> Option<&CompleteShip> {
+        unsafe { xc(self.enemy_ship) }
     }
-    pub unsafe fn ship_manager_mut(&mut self) -> &mut ShipManager {
-        &mut *self.crew_control.ship_manager
+    pub fn star_map(&self) -> Option<&StarMap> {
+        unsafe { xc(self.star_map) }
     }
-    pub unsafe fn target_self_with_mind_control_error(
-        &self,
-        room_id: usize,
-    ) -> Option<&'static str> {
-        if !self.ship_manager().has_system(System::Mind) {
+    pub fn star_map_mut(&mut self) -> Option<&mut StarMap> {
+        unsafe { xm(self.star_map) }
+    }
+    pub fn ship_manager(&self) -> Option<&ShipManager> {
+        unsafe { xc(self.crew_control.ship_manager) }
+    }
+    pub fn ship_manager_mut(&mut self) -> Option<&mut ShipManager> {
+        unsafe { xm(self.crew_control.ship_manager) }
+    }
+    pub fn target_self_with_mind_control_error(&self, room_id: i32) -> Option<&'static str> {
+        if !self.ship_manager().unwrap().has_system(System::Mind) {
             Some("the mind control system is not installed")
-        } else if !self.ship_manager().ship.get_room_blackout(room_id)
-            || self.ship_manager().has_crew("slug")
+        } else if !self.ship_manager().unwrap().ship.get_room_blackout(room_id)
+            || self.ship_manager().unwrap().has_crew("slug")
             || self.equip_screen.has_augment("LIFE_SCANNER")
         {
             None
@@ -7844,11 +8194,11 @@ impl CommandGui {
             Some("the sensors don't detect life in the target room")
         }
     }
-    pub unsafe fn mind_control_blocked(&self) -> bool {
-        if !self.ship_manager().has_system(System::Mind) {
+    pub fn mind_control_blocked(&self) -> bool {
+        if !self.ship_manager().unwrap().has_system(System::Mind) {
             return false;
         }
-        let mind = self.ship_manager().mind_system();
+        let mind = self.ship_manager().unwrap().mind_system().unwrap();
         if !mind.b_blocked {
             return false;
         }
@@ -7918,6 +8268,12 @@ pub struct FocusWindow {
     pub b_close_button_selected: bool,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x18)]
     pub position: Point,
+}
+
+impl FocusWindow {
+    pub fn vtable(&self) -> &'static VtableFocusWindow {
+        unsafe { xb(self.vtable).unwrap() }
+    }
 }
 
 #[repr(C)]
@@ -8046,6 +8402,12 @@ pub struct Blueprint {
     /// Inherited from Blueprint
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x70)]
     pub type_: c_int,
+}
+
+impl Blueprint {
+    pub fn vtable(&self) -> &'static VtableBlueprint {
+        unsafe { xb(self.vtable).unwrap() }
+    }
 }
 
 #[repr(C)]
@@ -8197,6 +8559,9 @@ pub struct WeaponBlueprint {
 }
 
 impl WeaponBlueprint {
+    pub fn vtable(&self) -> &'static VtableBlueprint {
+        unsafe { xb(self.vtable).unwrap() }
+    }
     pub fn can_target_self(&self) -> bool {
         self.type_ == crate::xml::WeaponType::Bomb as i32
     }
@@ -8238,6 +8603,12 @@ pub struct DroneBlueprint {
     pub combat_icon: StdString,
 }
 
+impl DroneBlueprint {
+    pub fn vtable(&self) -> &'static VtableBlueprint {
+        unsafe { xb(self.vtable).unwrap() }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
 pub struct AugmentBlueprint {
@@ -8256,6 +8627,12 @@ pub struct AugmentBlueprint {
     pub value: c_float,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x78)]
     pub stacking: bool,
+}
+
+impl AugmentBlueprint {
+    pub fn vtable(&self) -> &'static VtableBlueprint {
+        unsafe { xb(self.vtable).unwrap() }
+    }
 }
 
 #[repr(C)]
@@ -8293,6 +8670,12 @@ pub struct CrewBlueprint {
     pub color_layers: Vector<Vector<GL_Color>>,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0xe8)]
     pub color_choices: Vector<c_int>,
+}
+
+impl CrewBlueprint {
+    pub fn vtable(&self) -> &'static VtableBlueprint {
+        unsafe { xb(self.vtable).unwrap() }
+    }
 }
 
 #[repr(C)]
@@ -8377,6 +8760,18 @@ pub struct ResourceEvent {
     pub upgrade_success_flag: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x170)]
     pub remove_item: StdString,
+}
+
+impl ResourceEvent {
+    pub fn weapon(&self) -> Option<&WeaponBlueprint> {
+        unsafe { xb(self.weapon) }
+    }
+    pub fn drone(&self) -> Option<&DroneBlueprint> {
+        unsafe { xb(self.drone) }
+    }
+    pub fn augment(&self) -> Option<&AugmentBlueprint> {
+        unsafe { xb(self.augment) }
+    }
 }
 
 #[cfg(test)]

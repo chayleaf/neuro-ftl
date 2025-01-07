@@ -1,7 +1,5 @@
 use std::{fs::File, io::Write, sync::mpsc};
 
-use log::Log;
-
 pub fn init() {
     let file = std::env::var("RUST_LOG_FILE")
         .ok()

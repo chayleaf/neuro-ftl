@@ -325,20 +325,27 @@ pub struct RepairAll;
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SwitchStorePage;
 
-#[derive(Debug, Deserialize, JsonSchemaNoRef)]
+#[derive(Copy, Clone, Debug, Deserialize, JsonSchemaNoRef, Hash, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemType {
-    Fuel,
     Missiles,
-    DronePart,
+    Fuel,
+    DroneParts,
 }
 
 impl ItemType {
-    pub fn blueprint_name(&self) -> &'static str {
+    pub fn to_str(&self) -> &'static str {
         match self {
-            Self::Fuel => "fuel",
             Self::Missiles => "missiles",
-            Self::DronePart => "drones",
+            Self::Fuel => "fuel",
+            Self::DroneParts => "drone_parts",
+        }
+    }
+    pub fn id(&self) -> i32 {
+        match self {
+            Self::Missiles => 0,
+            Self::Fuel => 1,
+            Self::DroneParts => 2,
         }
     }
 }
