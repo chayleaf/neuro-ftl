@@ -2843,11 +2843,10 @@ fn available_actions(app: &CApp) -> ActionDb {
                 .iter()
                 .map(|x| unsafe { xc(*x).unwrap() })
             {
-                if b.blueprint.is_null() {
+                let Some(bp) = b.blueprint() else {
                     continue;
-                }
-                let Some(sys) = System::from_name(b.blueprint().unwrap().name.to_str().as_ref())
-                else {
+                };
+                let Some(sys) = System::from_name(bp.name.to_str().as_ref()) else {
                     continue;
                 };
                 systems.insert(sys.to_string());

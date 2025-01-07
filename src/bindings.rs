@@ -3,12 +3,13 @@ use std::{
     borrow::Cow,
     cmp::Ordering,
     collections::HashMap,
-    ffi::{c_char, c_double, c_float, c_int, c_uint, CStr},
+    ffi::{c_double, c_float, c_int, c_uint},
     fmt,
     marker::PhantomData,
     mem,
     ops::{Deref, DerefMut, Range},
     ptr,
+    sync::atomic::AtomicI32,
 };
 
 use neuro_ftl_derive::{vtable, TestOffsets};
@@ -1023,19 +1024,22 @@ pub struct Queue<T> {
 }
 
 #[repr(C)]
+#[derive(Debug, TestOffsets)]
+#[cfg(target_os = "linux")]
+pub struct StdStringRep {
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
+    pub length: usize,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x8)]
+    pub capacity: usize,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x10)]
+    pub refc: AtomicI32,
+}
+
+#[repr(C)]
 #[derive(Debug)]
 #[cfg(target_os = "linux")]
 pub struct StdString {
-    pub data: *const c_char,
-}
-
-impl StdString {
-    pub fn as_c_str(&self) -> &CStr {
-        unsafe { CStr::from_ptr(self.data) }
-    }
-    pub fn to_str(&self) -> Cow<'_, str> {
-        self.as_c_str().to_string_lossy()
-    }
+    pub data: *const StdStringRep,
 }
 
 #[repr(C)]
@@ -1048,6 +1052,23 @@ pub struct StdString {
     pub size: usize,
     pub res: usize,
     pub extra: [u8; 12],
+}
+
+impl StdString {
+    #[cfg(target_os = "linux")]
+    fn rep(&self) -> &StdStringRep {
+        unsafe { &*self.data.sub(1) }
+    }
+    #[cfg(target_os = "linux")]
+    pub fn to_str(&self) -> Cow<'_, str> {
+        let rep = self.rep();
+        // log::trace!("data: {:?}", self.data);
+        String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(self.data.cast(), rep.length) })
+    }
+    #[cfg(target_os = "windows")]
+    pub fn to_str(&self) -> Cow<'_, str> {
+        String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(self.data.cast(), self.size) })
+    }
 }
 
 #[vtable]
@@ -2828,7 +2849,9 @@ pub struct UpgradeBox {
 
 impl UpgradeBox {
     pub fn blueprint(&self) -> Option<&SystemBlueprint> {
-        unsafe { xb(self.blueprint) }
+        (!self._sil_do_not_use_system.is_null())
+            .then(|| unsafe { xb(self.blueprint) })
+            .flatten()
     }
     pub fn current_button(&self) -> Option<&Button> {
         unsafe { xc(self.current_button) }
