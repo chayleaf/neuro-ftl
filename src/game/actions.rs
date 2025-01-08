@@ -263,6 +263,11 @@ pub struct BuyDrone {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct BuyCrew {
+    pub index: u8,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct BuyConsumable {
     pub item: ItemType,
 }
@@ -586,6 +591,9 @@ pub enum FtlActions {
     /// Buy a ship augmentation from the shop.
     #[name = "buy_augmentation"]
     BuyAugmentation(BuyAugmentation),
+    /// Buy a crew member from the shop.
+    #[name = "buy_crew"]
+    BuyCrew(BuyCrew),
     /// Switch the store page, this will reveal different items you could buy. There's a total of 2
     /// pages.
     #[name = "switch_store_page"]
