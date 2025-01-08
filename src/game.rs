@@ -1905,13 +1905,18 @@ impl neuro_sama::game::GameMut for State {
                 } else {
                     let gui = app.gui_mut().unwrap();
                     let upgrades = &mut gui.upgrade_screen;
+                    upgrades.base.b_close_button_selected = false;
+                    for b in upgrades.v_upgrade_boxes.iter() {
+                        let b = unsafe { xm(*b).unwrap() };
+                        b.current_button_mut().unwrap().base.b_hover = false;
+                    }
                     upgrades.undo_button.base.b_hover = true;
+                    upgrades.reactor_button.base.base.b_hover = false;
                     unsafe {
                         upgrades
-                            .undo_button
                             .base
                             .vtable()
-                            .on_click(ptr::addr_of_mut!(upgrades.undo_button.base));
+                            .mouse_click(ptr::addr_of_mut!(upgrades.base), 0, 0);
                     }
                     Ok(Cow::from("ship upgrades undone").into())
                 }
