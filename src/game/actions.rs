@@ -564,7 +564,7 @@ pub enum FtlActions {
     /// Do a FTL jump to a different star system in a specific direction.
     #[name = "jump"]
     Jump(Jump),
-    /// Open the next sector selection, allowing you to progress in the game.
+    /// Open the next sector selection, allowing you to progress to the next sector in the game.
     #[name = "open_next_sector_selection"]
     NextSector(NextSector),
     /// Jump to the next sector, progressing the game.

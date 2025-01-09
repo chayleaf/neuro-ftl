@@ -1311,13 +1311,21 @@ impl neuro_sama::game::GameMut for State {
                                 }
                                 b.current_button_mut().unwrap().base.b_hover = true;
                                 b.base.base.mouse_hover = false;
+                                log::debug!("{:?}", b.base.base.vtable().mouse_click);
                                 unsafe {
                                     b.base
                                         .base
                                         .vtable()
                                         .mouse_click(ptr::addr_of_mut!(b.base.base), false);
                                 }
-                                ret = Ok(Cow::from("successfully initiated hacking").into());
+                                assert!(
+                                    gui.ship_manager()
+                                        .unwrap()
+                                        .cloak_system()
+                                        .unwrap()
+                                        .b_turned_on
+                                );
+                                ret = Ok(Cow::from("successfully initiated cloaking").into());
                                 break;
                             }
                         }
@@ -1860,9 +1868,12 @@ impl neuro_sama::game::GameMut for State {
                                 ))
                                 .into())
                             } else if power_manager(upgrades.ship_manager().unwrap().i_ship_id)
-                                .is_some_and(|x| x.current_power.second > 24)
+                                .is_some_and(|x| {
+                                    x.current_power.second + upgrades.reactor_button.temp_upgrade
+                                        >= 25
+                                })
                             {
-                                Err(Cow::from("the reactor is already at max power (24)").into())
+                                Err(Cow::from("the reactor is already at max power (25)").into())
                             } else {
                                 let btn = &mut upgrades.reactor_button;
                                 btn.base.base.b_hover = true;
@@ -1903,7 +1914,11 @@ impl neuro_sama::game::GameMut for State {
                                             0,
                                         );
                                     }
-                                    Err(Cow::from("successfully upgraded the system").into())
+                                    Ok(Cow::from(format!(
+                                        "will upgrade the {} system to level {} once you leave the upgrades screen",
+                                        b.blueprint().unwrap().desc.title.to_str(),
+                                        b.system().unwrap().power_state.second + b.temp_upgrade),
+                                    ).into())
                                 } else {
                                     Err(Cow::from(format!(
                                         "the system is already at max level ({})",
@@ -2275,13 +2290,13 @@ impl neuro_sama::game::GameMut for State {
                         (self.actions.valid(event), StoreType::Crew, event.index)
                     }
                     FtlActions::BuyConsumable(event) => {
-                        (self.actions.valid(event), StoreType::Items, 255)
+                        (self.actions.valid(event), StoreType::Items, 0)
                     }
                     FtlActions::BuySystem(event) => {
-                        (self.actions.valid(event), StoreType::Drones, 255)
+                        (self.actions.valid(event), StoreType::Systems, 0)
                     }
                     FtlActions::Repair1(event) => (self.actions.valid(event), StoreType::None, 0),
-                    FtlActions::RepairAll(event) => (self.actions.valid(event), StoreType::None, 1),
+                    FtlActions::RepairAll(event) => (self.actions.valid(event), StoreType::None, 0),
                     _ => unreachable!(),
                 };
                 if !valid {
@@ -2300,11 +2315,12 @@ impl neuro_sama::game::GameMut for State {
                         .unwrap();
                     let boxes = store.active_boxes_for(kind);
                     let b = match (index, action) {
-                        (255, FtlActions::BuySystem(event)) => boxes.iter().find(|x| {
-                            unsafe { xc(x.cast::<bindings::SystemStoreBox>()).unwrap() }.type_
-                                == event.system as i32
+                        (_, FtlActions::BuySystem(event)) => boxes.iter().find(|x| {
+                            System::from_id(
+                                unsafe { xc(x.cast::<bindings::SystemStoreBox>()).unwrap() }.type_,
+                            ) == System::from_id(event.system as i32)
                         }),
-                        (255, FtlActions::BuyConsumable(event)) => boxes.iter().find(|x| {
+                        (_, FtlActions::BuyConsumable(event)) => boxes.iter().find(|x| {
                             unsafe { xc(x.cast::<bindings::ItemStoreBox>()).unwrap() }
                                 .blueprint()
                                 .unwrap()
@@ -2658,6 +2674,8 @@ fn available_actions(app: &CApp) -> ActionDb {
                 _ => panic!(),
             }
             ret.actions.insert(actions::ChooseNextSector::name(), meta);
+        } else if s.wait_button.base.b_active {
+            ret.add::<actions::Wait>();
         } else {
             let loc = s.current_loc().unwrap();
             let locs: HashSet<_> = loc.neighbors().into_keys().map(|x| x.to_str()).collect();
@@ -2680,8 +2698,8 @@ fn available_actions(app: &CApp) -> ActionDb {
             }
             ret.actions.insert(actions::Jump::name(), meta);
         }
-        if s.wait_button.base.b_active {
-            ret.add::<actions::Wait>();
+        if s.end_button.base.b_active {
+            ret.add::<actions::NextSector>();
         }
         return ret;
     }
@@ -3198,7 +3216,10 @@ pub fn loop_hook2(app: &mut CApp) {
                             loop {
                                 tokio::select! {
                                     msg = game2ws_rx.recv() => {
-                                        let msg = msg.expect("game->ws channel closed");
+                                        let Some(msg) = msg else {
+                                            log::error!("game->ws channel closed");
+                                            return;
+                                        };
                                         log::info!("game2ws {msg:?}");
                                         if let Err(err) = ws.send(msg).await {
                                             log::error!("websocket send failed: {err}");
@@ -3316,7 +3337,36 @@ pub fn loop_hook2(app: &mut CApp) {
     }
 }
 
-pub unsafe extern "C" fn loop_hook(app: *mut CApp) {
-    assert!(!app.is_null());
-    loop_hook2(&mut *app);
+static DEACTIVATE: OnceLock<()> = OnceLock::new();
+
+pub fn activated() -> bool {
+    DEACTIVATE.get().is_none()
+}
+
+pub fn deactivate() {
+    log::error!("deactivating");
+    DEACTIVATE.get_or_init(|| {
+        if let Some(game) = unsafe { GAME.get_mut() } {
+            game.context("the mod just crashed... the game may or may not be still running, but you can no longer control it", false)
+                .unwrap();
+            game.tx = mpsc::channel(0).0;
+        }
+    });
+}
+
+pub unsafe fn loop_hook(app: *mut CApp) {
+    if !activated() {
+        log::trace!("deactivated");
+        return;
+    }
+    if !app.is_null() {
+        #[allow(clippy::blocks_in_conditions)]
+        if std::panic::catch_unwind(|| {
+            loop_hook2(&mut *app);
+        })
+        .is_err()
+        {
+            deactivate();
+        }
+    }
 }

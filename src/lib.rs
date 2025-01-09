@@ -10,7 +10,7 @@ use bindings::{
     CApp, CrewMember, Door, Drone, ProjectileFactory, SettingValues, ShipManager, TabbedWindow,
 };
 use ctor::ctor;
-use retour::GenericDetour;
+use game::{activated, deactivate};
 
 pub mod bindings;
 pub mod cross;
@@ -202,64 +202,66 @@ unsafe fn hook(base: *mut c_void) {
     DOOR_CLOSE.init(base);
     MOVE_CREW.init(base);
     SET_TAB.init(base);
-    #[cfg(target_os = "windows")]
-    let gen_input_events = base.byte_add(0x402AA0);
-    #[cfg(target_os = "linux")]
-    let gen_input_events = base.byte_add(0x41C490);
-    if std::slice::from_raw_parts(gen_input_events as *const u8, 8) != {
-        #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
-        {
-            b"USH\x89\xfbH\x83\xec"
-        }
-        #[cfg(target_os = "windows")]
-        b"W\x8d|$\x08\x83\xe4\xf0"
-    } {
-        log::error!(
-            "mismatch: {:?}",
-            std::slice::from_raw_parts(gen_input_events as *const u8, 8)
-        );
-        return;
-    }
 
     #[cfg(target_os = "linux")]
-    static mut GEN_INPUT_EVENTS: OnceLock<GenericDetour<unsafe extern "C" fn(*mut CApp)>> =
-        OnceLock::new();
+    {
+        static mut CRIT_ERR_HDLR: cross::Hook3<
+            0,
+            0x422140,
+            c_int,
+            *mut libc::siginfo_t,
+            *mut c_void,
+            (),
+        > = cross::Hook3::new();
+        pub unsafe extern "C" fn crit_err_hdlr_hook(
+            sig_num: c_int,
+            info: *mut libc::siginfo_t,
+            ucontext: *mut c_void,
+        ) {
+            if activated() {
+                deactivate();
+            } else {
+                CRIT_ERR_HDLR.call(sig_num, info, ucontext);
+            }
+        }
+        CRIT_ERR_HDLR.init(base, crit_err_hdlr_hook);
+    }
+
+    // quick sanity check
+    {
+        let mut gen_input_events = cross::Ptr::<0x402AA0, 0x41C490, c_void>::new();
+        gen_input_events.init(base);
+        let gen_input_events = gen_input_events.0;
+        if std::slice::from_raw_parts(gen_input_events as *const u8, 8) != {
+            #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+            {
+                b"USH\x89\xfbH\x83\xec"
+            }
+            #[cfg(target_os = "windows")]
+            b"W\x8d|$\x08\x83\xe4\xf0"
+        } {
+            log::error!(
+                "mismatch: {:?}",
+                std::slice::from_raw_parts(gen_input_events as *const u8, 8)
+            );
+            return;
+        }
+    }
+
+    static mut GEN_INPUT_EVENTS: cross::Hook1<0x402AA0, 0x41C490, *mut CApp, ()> =
+        cross::Hook1::new();
     #[cfg(target_os = "linux")]
     pub unsafe extern "C" fn gen_input_events_hook(app: *mut CApp) {
-        GEN_INPUT_EVENTS.get().unwrap_unchecked().call(app);
+        GEN_INPUT_EVENTS.call(app);
         game::loop_hook(app);
     }
     #[cfg(target_os = "windows")]
-    static mut GEN_INPUT_EVENTS: OnceLock<GenericDetour<unsafe extern "fastcall" fn(*mut CApp)>> =
-        OnceLock::new();
-    #[cfg(target_os = "windows")]
     pub unsafe extern "fastcall" fn gen_input_events_hook(app: *mut CApp) {
-        GEN_INPUT_EVENTS.get().unwrap_unchecked().call(app);
+        GEN_INPUT_EVENTS.call(app);
         game::loop_hook(app);
     }
 
-    GEN_INPUT_EVENTS.get_or_init(|| {
-        let hook = match GenericDetour::new(
-            std::mem::transmute::<*mut std::ffi::c_void, cross::Fn1<0, 0, *mut CApp, ()>>(
-                gen_input_events,
-            )
-            .0
-            .unwrap(),
-            gen_input_events_hook,
-        ) {
-            Ok(hook) => hook,
-            Err(err) => {
-                panic!("hook creation error: {err}");
-            }
-        };
-        match hook.enable() {
-            Ok(()) => log::info!("hook enabled"),
-            Err(err) => {
-                log::error!("hook error: {err}");
-            }
-        }
-        hook
-    });
+    GEN_INPUT_EVENTS.init(base, gen_input_events_hook);
 }
 
 #[ctor]
