@@ -158,7 +158,7 @@ pub struct ActivateBattery;
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TeleportSend {
-    pub target_room_id: Option<u8>,
+    pub target_room_id: u8,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -170,7 +170,7 @@ pub struct TeleportReturn {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenDoors {
-    pub door_ids: Vec<u8>,
+    pub door_ids: Vec<i8>,
     #[serde(default)]
     pub include_airlocks: bool,
 }
@@ -178,7 +178,7 @@ pub struct OpenDoors {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CloseDoors {
-    pub door_ids: Vec<u8>,
+    pub door_ids: Vec<i8>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -316,7 +316,7 @@ pub struct ChooseNextSector {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct Starmap;
+pub struct StarMap;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct NextSector;
@@ -558,9 +558,9 @@ pub enum FtlActions {
     /// sell.
     #[name = "sell"]
     Sell(Sell),
-    /// Open the starmap, allowing you to move to a different location.
-    #[name = "starmap"]
-    Starmap(Starmap),
+    /// Opens star map to choose jump location.
+    #[name = "star_map"]
+    StarMap(StarMap),
     /// Do a FTL jump to a different star system in a specific direction.
     #[name = "jump"]
     Jump(Jump),
@@ -622,10 +622,8 @@ pub enum FtlActions {
     /// Unpause the game, progressing the game.
     #[name = "unpause"]
     Unpause(UnpauseGame),
-    /// Wait for a single turn instead of doing an FTL jump. The rebels' fleet will progress
-    /// towards you as usual. If you set `distress_signal` to `true`, your ship will send out a
-    /// distress signal, broadcasting your location to ships that pass nearby. If you have no fuel,
-    /// this is your only way to get fuel.
+    /// Wait for help to arrive. Enabling the distress beacon might increase the chances you'll be
+    /// found, but no telling who will find you first.
     #[name = "skip_turn"]
     Wait(Wait),
 }

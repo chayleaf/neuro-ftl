@@ -191,7 +191,8 @@ mod test {
 
     #[test]
     fn test() {
-        let path = "/data/data/Games/SteamLibrary/steamapps/common/FTL Faster Than Light/bak/ftl.dat";
+        let path =
+            "/data/data/Games/SteamLibrary/steamapps/common/FTL Faster Than Light/bak/ftl.dat";
         let mut file = Pak::open(path).unwrap();
         assert!(file
             .read("data/text_misc.xml")

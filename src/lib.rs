@@ -203,30 +203,6 @@ unsafe fn hook(base: *mut c_void) {
     MOVE_CREW.init(base);
     SET_TAB.init(base);
 
-    #[cfg(target_os = "linux")]
-    {
-        static mut CRIT_ERR_HDLR: cross::Hook3<
-            0,
-            0x422140,
-            c_int,
-            *mut libc::siginfo_t,
-            *mut c_void,
-            (),
-        > = cross::Hook3::new();
-        pub unsafe extern "C" fn crit_err_hdlr_hook(
-            sig_num: c_int,
-            info: *mut libc::siginfo_t,
-            ucontext: *mut c_void,
-        ) {
-            if activated() {
-                deactivate();
-            } else {
-                CRIT_ERR_HDLR.call(sig_num, info, ucontext);
-            }
-        }
-        CRIT_ERR_HDLR.init(base, crit_err_hdlr_hook);
-    }
-
     // quick sanity check
     {
         let mut gen_input_events = cross::Ptr::<0x402AA0, 0x41C490, c_void>::new();
@@ -248,17 +224,40 @@ unsafe fn hook(base: *mut c_void) {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    {
+        static mut CRIT_ERR_HDLR: cross::Hook3<
+            0,
+            0x422140,
+            c_int,
+            *mut libc::siginfo_t,
+            *mut c_void,
+            (),
+        > = cross::Hook3::new();
+        cross_fn! {
+            unsafe fn crit_err_hdlr_hook(
+                sig_num: c_int,
+                info: *mut libc::siginfo_t,
+                ucontext: *mut c_void
+            ) {
+                if activated() {
+                    deactivate();
+                } else {
+                    CRIT_ERR_HDLR.call(sig_num, info, ucontext);
+                }
+            }
+        }
+        CRIT_ERR_HDLR.init(base, crit_err_hdlr_hook);
+    }
+
     static mut GEN_INPUT_EVENTS: cross::Hook1<0x402AA0, 0x41C490, *mut CApp, ()> =
         cross::Hook1::new();
-    #[cfg(target_os = "linux")]
-    pub unsafe extern "C" fn gen_input_events_hook(app: *mut CApp) {
-        GEN_INPUT_EVENTS.call(app);
-        game::loop_hook(app);
-    }
-    #[cfg(target_os = "windows")]
-    pub unsafe extern "fastcall" fn gen_input_events_hook(app: *mut CApp) {
-        GEN_INPUT_EVENTS.call(app);
-        game::loop_hook(app);
+
+    cross_fn! {
+        unsafe fn gen_input_events_hook(app: *mut CApp) {
+            GEN_INPUT_EVENTS.call(app);
+            game::loop_hook(app);
+        }
     }
 
     GEN_INPUT_EVENTS.init(base, gen_input_events_hook);
@@ -270,8 +269,6 @@ unsafe fn init() {
     // env_logger::init();
     // this the `konigsberg` code which contains a steam API shim so this can be used as a steam
     // API wrapper
-    #[cfg(target_os = "windows")]
-    let _ = konigsberg::SteamAPI_SteamApps_v009;
     #[cfg(target_os = "linux")]
     {
         // on Linux, do LD_PRELOAD stuff
@@ -316,7 +313,7 @@ unsafe fn init() {
     }
     #[cfg(target_os = "windows")]
     {
-        // on Windows, we aren't responsible for loading the DLL, something else must inject it
+        let _ = konigsberg::SteamAPI_SteamApps_v009;
         let base: *mut c_void;
         std::arch::asm! {
             "mov eax, fs:[30h]",

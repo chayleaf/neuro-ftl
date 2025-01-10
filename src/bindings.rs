@@ -54,6 +54,46 @@ pub enum System {
 }
 
 impl System {
+    pub fn tooltip(&self, enemy: bool) -> &'static str {
+        match (self, enemy) {
+            (Self::Oxygen, false) => "Oxygen: Replenishes the ship's oxygen supply.",
+            (Self::Oxygen, true) => "Oxygen: Replenishes the enemy ship's oxygen supply.",
+            (Self::Doors, false) => "Doors: Allows for remote opening/closing of doors.",
+            (Self::Doors, true) => "Doors: Powers enemy blast doors, delaying boarder movement.",
+            (Self::Shields, false) => "Shields: Sustains projectile-blocking shields. Manning increases shield recharge speed.",
+            (Self::Shields, true) => "Shields: Powers the enemy's projectile blocking shields.",
+            (Self::Pilot, false) => "Piloting: Requires a crewmember to evade in combat or jump.",
+            (Self::Pilot, true) => "Piloting: If functional with a crew-member, the enemy can dodge your shots.",
+            (Self::Engines, false) => "Engines: Charges the FTL drive and powers evasion. Manning increases dodge chance.",
+            (Self::Engines, true) => "Engines: Charges the enemy FTL drive and powers evasion.",
+            (Self::Sensors, false) => "Sensors: Enables view of all rooms and info for enemy ships.",
+            (Self::Sensors, true) => "Sensors: No functionality for the enemy.",
+            (Self::Medbay, false) => "Medbay: Heals crewmembers inside the Medbay",
+            (Self::Medbay, true) => "Medbay: Heals enemy crewmembers.",
+            (Self::Weapons, false) => "Weapons: Activate a weapon to charge and target it to fire. Manning reduces charge time.",
+            (Self::Weapons, true) => "Weapons: Powers the enemy's weapons. Destroy it to stop them firing.",
+            (Self::Drones, false) => "Drones: Power automated robots for attack and defense.",
+            (Self::Drones, true) => "Drones: Powers the enemy's drones. Destroy it to shut them down.",
+            (Self::Teleporter, false) => "Teleporter: Send crewmembers in the teleporter room to board enemy ships.",
+            (Self::Teleporter, true) => "Teleporter: The enemy uses this to teleport intruders onto your ship.",
+            (Self::Cloaking, false) => "Cloaking: Partially disappear into another dimension, providing +60 to dodge and temporarily stopping enemy weapon charging and aiming.",
+            (Self::Cloaking, true) => "Cloaking: When in use, your weapons cannot charge and the enemy evasion is increased by 60.",
+            (Self::Artillery, _) => "BUG IN THE MOD", // actual text is taken from weapon text
+            (Self::Reactor, false) => "Reactor: Reactor energy powers your systems.",
+            (Self::Reactor, true) => "Reactor: Reactor energy powers enemy systems.",
+            (Self::Battery, false) => "Battery: Activate to temporarily increase available reactor power.",
+            (Self::Battery, true) => "Battery: Grants temporary power to the enemy.",
+            (Self::Clonebay, false) => "Clone Bay: Automatically clones any dead crewmember.",
+            (Self::Clonebay, true) => "Clone Bay: Will automatically clone any crew you kill, reviving them to fight again!",
+            (Self::Mind, false) => "Mind Control: Turn enemies into friendlies temporarily.",
+            (Self::Mind, true) => "Mind Control: Can temporarily gain control of your crew. Destroy it to prevent this.",
+            (Self::Hacking, false) => "Hacking: Lockdown a system room while periodically disrupting the system and stunning crew.",
+            (Self::Hacking, true) => "Hacking: Launches a hacking drone that can temporarily disable a system.",
+            (Self::Total, _) => "BUG IN THE MOD",
+            (Self::Random, _) => "BUG IN THE MOD",
+            (Self::Room, _) => "BUG IN THE MOD",
+        }
+    }
     pub fn from_id(id: c_int) -> Option<System> {
         Some(match id {
             0 => Self::Shields,
@@ -3824,23 +3864,17 @@ impl FTLButton {
         if !self.base.base.b_active {
             return false;
         }
-        if !self
-            .ship()
-            .unwrap()
+        let ship = self.ship().unwrap();
+        if !ship
             .system(System::Engines)
             .is_some_and(|x| x.functioning())
         {
             return false;
         }
-        if !self
-            .ship()
-            .unwrap()
-            .system(System::Pilot)
-            .is_some_and(|x| x.functioning())
-        {
+        if !ship.system(System::Pilot).is_some_and(|x| x.functioning()) {
             return false;
         }
-        if self.ship().unwrap().jump_timer.first < self.ship().unwrap().jump_timer.second {
+        if ship.jump_timer.first < ship.jump_timer.second {
             return false;
         }
         true
@@ -4264,24 +4298,11 @@ impl CombatControl {
         unsafe { xc(self.ship_manager) }
     }
     pub fn weapons_armed(&self) -> bool {
-        self.ship_manager().unwrap().has_system(System::Teleporter)
-            && self
-                .ship_manager()
-                .unwrap()
-                .teleport_system()
-                .unwrap()
-                .i_armed
-                != 0
+        let ship = self.ship_manager().unwrap();
+        ship.teleport_system().is_some_and(|x| x.i_armed != 0)
             || !self.weap_control.armed_weapon.is_null()
-            || self.ship_manager().unwrap().has_system(System::Mind)
-                && self.ship_manager().unwrap().mind_system().unwrap().i_armed != 0
-            || self.ship_manager().unwrap().has_system(System::Hacking)
-                && self
-                    .ship_manager()
-                    .unwrap()
-                    .hacking_system()
-                    .unwrap()
-                    .b_armed
+            || ship.mind_system().is_some_and(|x| x.i_armed != 0)
+            || ship.hacking_system().is_some_and(|x| x.b_armed)
     }
 }
 
@@ -4914,16 +4935,19 @@ pub struct VtableShipManager {
     pub damage_beam: Option<fn(*mut ShipManager, Pointf, Pointf, Damage) -> bool>,
     pub damage_area: Option<fn(*mut ShipManager, Pointf, Damage, bool) -> bool>,
     pub damage_shield: Option<fn(*mut ShipManager, Pointf, Damage, bool) -> bool>,
+    // 10
     pub damage_target: Option<fn(*mut ShipManager, Pointf, Damage)>,
     pub get_dodged: Option<fn(*mut ShipManager) -> bool>,
     pub get_random_targeting_point: Option<fn(*mut ShipManager, bool) -> Pointf>,
     pub get_all_targeting_points: Option<fn(*mut ShipManager) -> Vector<Pointf>>,
     pub get_shield_power: Option<fn(*mut ShipManager) -> ShieldPower>,
+    // 15
     pub get_shield_shape: Option<fn(*mut ShipManager) -> Ellipse>,
     pub get_is_jumping: Option<fn(*mut ShipManager) -> bool>,
     pub get_is_dying: Option<fn(*mut ShipManager) -> bool>,
     pub get_space_id: Option<fn(*mut ShipManager) -> c_int>,
     pub get_owner_id: Option<fn(*mut ShipManager) -> c_int>,
+    // 20
     pub get_self_id: Option<fn(*mut ShipManager) -> c_int>,
 }
 
@@ -6471,13 +6495,45 @@ pub struct CrewMember {
     pub b_cloned: bool,
 }
 
-impl CrewMember {
-    pub fn vtable(&self) -> &'static VtableCrewMember {
-        unsafe { xb(self.vtable).unwrap() }
+#[repr(usize)]
+#[derive(Copy, Clone, Debug)]
+pub enum CrewSkill {
+    Piloting = 0,
+    Engines = 1,
+    Shields = 2,
+    Weapons = 3,
+    Repairing = 4,
+    Fighting = 5,
+}
+
+impl CrewSkill {
+    // getSkillBonus
+    pub fn bonus(&self, level: c_int) -> f32 {
+        match (self, level) {
+            (Self::Piloting | Self::Engines, 0) => 0.0,
+            (Self::Piloting | Self::Engines, 1) => 5.0,
+            (Self::Piloting | Self::Engines, 2) => 7.0,
+            (Self::Piloting | Self::Engines, 3) => 10.0,
+            (Self::Shields, 0) => 1.0,
+            (Self::Shields, 1) => 1.1,
+            (Self::Shields, 2) => 1.2,
+            (Self::Shields, 3) => 1.3,
+            (Self::Weapons, 0) => 1.0,
+            (Self::Weapons, 1) => 0.9,
+            (Self::Weapons, 2) => 0.85,
+            (Self::Weapons, 3) => 0.8,
+            (Self::Repairing | Self::Fighting, 0 | 1) => 1.0,
+            (Self::Repairing | Self::Fighting, 2) => 1.1,
+            (Self::Repairing | Self::Fighting, 3) => 1.2,
+            _ => 0.0,
+        }
     }
 }
 
 impl CrewMember {
+    pub fn vtable(&self) -> &'static VtableCrewMember {
+        unsafe { xb(self.vtable).unwrap() }
+    }
     pub fn intruder(&self) -> bool {
         if self.b_mind_controlled {
             self.current_ship_id == self.i_ship_id
@@ -6487,6 +6543,15 @@ impl CrewMember {
     }
     pub fn move_to_room(&mut self, room_id: c_int, slot_id: c_int, force: bool) -> bool {
         unsafe { super::MOVE_CREW.call(ptr::addr_of_mut!(*self), room_id, slot_id, force) }
+    }
+    pub fn skill_from_system(system: System) -> Option<CrewSkill> {
+        match system {
+            System::Engines => Some(CrewSkill::Engines),
+            System::Pilot => Some(CrewSkill::Piloting),
+            System::Shields => Some(CrewSkill::Shields),
+            System::Weapons => Some(CrewSkill::Weapons),
+            _ => None,
+        }
     }
 }
 
@@ -7194,6 +7259,7 @@ pub struct VtableShipSystem {
     pub remove_battery_power: Option<fn(*mut ShipSystem)>,
     pub get_weapon_info: Option<fn(*mut ShipSystem) -> *const WeaponBlueprint>,
     pub get_override_tooltip: Option<fn(*mut ShipSystem) -> StdString>,
+    // 30
     pub check_max_power: Option<fn(*mut ShipSystem)>,
     pub set_bonus_power: Option<fn(*mut ShipSystem, c_int, c_int)>,
     pub add_damage: Option<fn(*mut ShipSystem, c_int)>,
@@ -7204,6 +7270,7 @@ pub struct VtableShipSystem {
     pub on_render_floor: Option<fn(*mut ShipSystem)>,
     pub on_render_effects: Option<fn(*mut ShipSystem)>,
     pub on_loop: Option<fn(*mut ShipSystem)>,
+    // 40
     pub get_needs_power: Option<fn(*mut ShipSystem) -> bool>,
     pub restart: Option<fn(*mut ShipSystem)>,
     pub clickable: Option<fn(*mut ShipSystem) -> bool>,
@@ -7283,7 +7350,7 @@ pub struct ShipSystem {
     /// Basically never used
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x45)]
     pub b_manned: bool,
-    /// How many people are manning
+    /// Max manning level I think
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x48)]
     pub i_active_manned: c_int,
     /// Whether manning gives bonus power
@@ -7395,20 +7462,42 @@ impl ShipSystem {
     pub fn vtable(&self) -> &'static VtableShipSystem {
         unsafe { xb(self.vtable).unwrap() }
     }
-}
-
-impl ShipSystem {
-    pub fn max_power(&self) -> c_int {
-        let ret = self.power_state.second
-            - (self.health_state.second - self.health_state.first)
-            - self.i_temp_power_loss;
+    pub fn blocked_boosted(&self, count_limit: bool) -> bool {
+        count_limit
+            && self.i_temp_power_cap
+                < self.power_state.second
+                    + i32::from(
+                        self.b_boostable
+                            .then_some(self.b_level_boostable)
+                            .unwrap_or_default(),
+                    )
+            || self.b_occupied
+            || self.b_on_fire
+            || self.locked()
+            || self.damage() > 0
+            || !self.powered()
+            || self.i_hack_effect > 0 && self.b_under_attack
+            || self.i_temp_power_loss > 0
+            || self.i_temp_divide_power > 1
+    }
+    pub fn power_cap(&self) -> c_int {
         if self.i_temp_power_cap > 7 {
             self.power_state.second
         } else {
             self.i_temp_power_cap
         }
         .max(0)
-        .min(ret)
+    }
+    pub fn manned_boost(&self) -> c_int {
+        (self.b_boostable && self.damage() == 0)
+            .then_some(self.i_active_manned.max(0))
+            .unwrap_or_default()
+    }
+    pub fn max_power(&self) -> c_int {
+        let ret = self.power_state.second
+            - (self.health_state.second - self.health_state.first)
+            - self.i_temp_power_loss;
+        self.power_cap().min(ret)
     }
     pub fn effective_power(&self) -> c_int {
         c_int::from(
@@ -7808,34 +7897,54 @@ impl ShipManager {
         }
     }
     pub fn shield_system(&self) -> Option<&Shields> {
-        unsafe { xc(self.shield_system) }
+        self.has_system(System::Shields)
+            .then(|| unsafe { xc(self.shield_system) })
+            .flatten()
     }
     pub fn engine_system(&self) -> Option<&EngineSystem> {
-        unsafe { xc(self.engine_system) }
+        self.has_system(System::Engines)
+            .then(|| unsafe { xc(self.engine_system) })
+            .flatten()
     }
     pub fn oxygen_system(&self) -> Option<&OxygenSystem> {
-        unsafe { xc(self.oxygen_system) }
+        self.has_system(System::Oxygen)
+            .then(|| unsafe { xc(self.oxygen_system) })
+            .flatten()
     }
     pub fn weapon_system(&self) -> Option<&WeaponSystem> {
-        unsafe { xc(self.weapon_system) }
+        self.has_system(System::Weapons)
+            .then(|| unsafe { xc(self.weapon_system) })
+            .flatten()
     }
     pub fn drone_system(&self) -> Option<&DroneSystem> {
-        unsafe { xc(self.drone_system) }
+        self.has_system(System::Drones)
+            .then(|| unsafe { xc(self.drone_system) })
+            .flatten()
     }
     pub fn medbay_system(&self) -> Option<&MedbaySystem> {
-        unsafe { xc(self.medbay_system) }
+        self.has_system(System::Medbay)
+            .then(|| unsafe { xc(self.medbay_system) })
+            .flatten()
     }
     pub fn teleport_system(&self) -> Option<&TeleportSystem> {
-        unsafe { xc(self.teleport_system) }
+        self.has_system(System::Teleporter)
+            .then(|| unsafe { xc(self.teleport_system) })
+            .flatten()
     }
     pub fn teleport_system_mut(&mut self) -> Option<&mut TeleportSystem> {
-        unsafe { xm(self.teleport_system) }
+        self.has_system(System::Teleporter)
+            .then(|| unsafe { xm(self.teleport_system) })
+            .flatten()
     }
     pub fn cloak_system(&self) -> Option<&CloakingSystem> {
-        unsafe { xc(self.cloak_system) }
+        self.has_system(System::Cloaking)
+            .then(|| unsafe { xc(self.cloak_system) })
+            .flatten()
     }
     pub fn cloak_system_mut(&mut self) -> Option<&mut CloakingSystem> {
-        unsafe { xm(self.cloak_system) }
+        self.has_system(System::Cloaking)
+            .then(|| unsafe { xm(self.cloak_system) })
+            .flatten()
     }
     pub fn artillery_systems(&self) -> impl Iterator<Item = &ArtillerySystem> {
         self.artillery_systems
@@ -7843,25 +7952,39 @@ impl ShipManager {
             .map(|x| unsafe { xc(*x).unwrap() })
     }
     pub fn battery_system(&self) -> Option<&BatterySystem> {
-        unsafe { xc(self.battery_system) }
+        self.has_system(System::Battery)
+            .then(|| unsafe { xc(self.battery_system) })
+            .flatten()
     }
     pub fn battery_system_mut(&mut self) -> Option<&mut BatterySystem> {
-        unsafe { xm(self.battery_system) }
+        self.has_system(System::Battery)
+            .then(|| unsafe { xm(self.battery_system) })
+            .flatten()
     }
     pub fn clone_system(&self) -> Option<&CloneSystem> {
-        unsafe { xc(self.clone_system) }
+        self.has_system(System::Clonebay)
+            .then(|| unsafe { xc(self.clone_system) })
+            .flatten()
     }
     pub fn mind_system(&self) -> Option<&MindSystem> {
-        unsafe { xc(self.mind_system) }
+        self.has_system(System::Mind)
+            .then(|| unsafe { xc(self.mind_system) })
+            .flatten()
     }
     pub fn mind_system_mut(&mut self) -> Option<&mut MindSystem> {
-        unsafe { xm(self.mind_system) }
+        self.has_system(System::Mind)
+            .then(|| unsafe { xm(self.mind_system) })
+            .flatten()
     }
     pub fn hacking_system(&self) -> Option<&HackingSystem> {
-        unsafe { xc(self.hacking_system) }
+        self.has_system(System::Hacking)
+            .then(|| unsafe { xc(self.hacking_system) })
+            .flatten()
     }
     pub fn hacking_system_mut(&mut self) -> Option<&mut HackingSystem> {
-        unsafe { xm(self.hacking_system) }
+        self.has_system(System::Hacking)
+            .then(|| unsafe { xm(self.hacking_system) })
+            .flatten()
     }
     pub fn system(&self, system: System) -> Option<&ShipSystem> {
         let key = *self.system_key.get(system as usize).unwrap();
@@ -7883,15 +8006,15 @@ impl ShipManager {
             .any(|x| !x.b_dead && x.blueprint.name.to_str() == name)
     }
     pub fn drone_count(&self) -> c_int {
-        if self.has_system(System::Drones) {
-            self.drone_system().unwrap().drone_count
+        if let Some(sys) = self.drone_system() {
+            sys.drone_count
         } else {
             self.temp_drone_count
         }
     }
     pub fn missile_count(&self) -> c_int {
-        if self.has_system(System::Weapons) {
-            self.weapon_system().unwrap().missile_count
+        if let Some(sys) = self.weapon_system() {
+            sys.missile_count
         } else {
             self.temp_missile_count
         }
@@ -8210,10 +8333,9 @@ impl CommandGui {
         }
     }
     pub fn mind_control_blocked(&self) -> bool {
-        if !self.ship_manager().unwrap().has_system(System::Mind) {
+        let Some(mind) = self.ship_manager().unwrap().mind_system() else {
             return false;
-        }
-        let mind = self.ship_manager().unwrap().mind_system().unwrap();
+        };
         if !mind.b_blocked {
             return false;
         }

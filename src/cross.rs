@@ -2,6 +2,34 @@ use std::sync::OnceLock;
 
 use retour::GenericDetour;
 
+#[macro_export]
+macro_rules! cross_fn {
+    {
+        $vis:vis unsafe fn $name:ident($($arg:ident : $ty:ty $(,)?)?) $body:block
+    } => {
+        #[cfg(target_os = "linux")]
+        $vis unsafe extern "C" fn $name($($arg: $ty)?) {
+            $body
+        }
+        #[cfg(target_os = "windows")]
+        $vis unsafe extern "fastcall" fn $name($($arg: $ty)?) {
+            $body
+        }
+    };
+    {
+        $vis:vis unsafe fn $name:ident($arg0:ident : $ty0:ty $(, $arg:ident : $ty:ty)+ $(,)?) $body:block
+    } => {
+        #[cfg(target_os = "linux")]
+        $vis unsafe extern "C" fn $name($arg0: $ty0, $($arg: $ty),+) {
+            $body
+        }
+        #[cfg(target_os = "windows")]
+        $vis unsafe extern "fastcall" fn $name($arg0: $ty0, _: std::ffi::c_int, $($arg: $ty),+) {
+            $body
+        }
+    };
+}
+
 #[repr(transparent)]
 pub struct Ptr<const WINDOWS_OFFSET: usize, const LINUX_OFFSET: usize, T>(pub *mut T);
 

@@ -149,6 +149,7 @@ impl ShipGraph {
     pub fn add_door(&mut self, id: c_int, a: c_int, b: c_int) {
         self.rooms.entry(a).or_default().push((id, b));
         self.rooms.entry(b).or_default().push((id, a));
+        log::info!("adding path {a}<-({id})->{b}");
     }
     pub fn shortest_path(
         &self,
@@ -159,28 +160,37 @@ impl ShipGraph {
         let mut vis = HashSet::new();
         q.push((usize::MAX, vec![], a));
         while let Some((level, path, room)) = q.pop() {
+            log::info!("popping {:?}", (level, &path, room));
             if room == b {
+                log::info!("reached");
                 return Ok(path);
             }
-            if vis.contains(&room) {
+            if !vis.insert(room) {
+                log::info!("already visited {room}, skipping");
                 continue;
             }
-            vis.insert(room);
-            let Some(a) = self.rooms.get(&a) else {
-                return Err(Some(format!("room {a} doesn't exist").into()));
+            let Some(room) = self.rooms.get(&room) else {
+                return Err(Some(format!("room {room} doesn't exist").into()));
             };
-            for (door, room) in a.iter().copied() {
+            for (door, room) in room.iter().copied() {
                 if vis.contains(&room) {
                     continue;
                 }
                 let mut path = path.clone();
                 path.push(door);
+                log::info!("pushing {:?}", (level - 1, &path, room));
                 q.push((level - 1, path, room));
             }
         }
         Err(Some(
             format!("there's no path between rooms {a} and {b}").into(),
         ))
+    }
+}
+
+impl State {
+    fn app_mut(&self) -> Option<&mut CApp> {
+        unsafe { xm(self.app) }
     }
 }
 
@@ -197,11 +207,9 @@ impl neuro_sama::game::GameMut for State {
         Option<impl 'static + Into<Cow<'static, str>>>,
         Option<impl 'static + Into<Cow<'static, str>>>,
     > {
-        let app = self.app;
-        if app.is_null() {
+        let Some(app) = self.app_mut() else {
             return Err(Cow::from("CApp is null, game is broken").into());
-        }
-        let app = unsafe { &mut *app };
+        };
         log::debug!("handling action: {action:?}");
         let ret: Result<Option<Cow<'static, str>>, Option<Cow<'static, str>>> = match action {
             // only main menu
@@ -557,11 +565,14 @@ impl neuro_sama::game::GameMut for State {
              */
             FtlActions::MainMenu(event) => {
                 if self.actions.valid(&event) && app.gui().unwrap().game_over_screen.base.b_open {
-                    unsafe {
+                    let sc = &mut app.gui_mut().unwrap().game_over_screen;
+                    // 2: quit, 5: main menu, 6: hangar, 7: stats
+                    sc.command = 5;
+                    /*unsafe {
                         app.base
                             .vtable()
                             .on_key_down(ptr::addr_of_mut!(app.base), 27);
-                    }
+                    }*/
                     Ok(Cow::from("entered the main menu").into())
                 } else {
                     Err(Cow::from("can't enter the main menu at this time").into())
@@ -1023,6 +1034,9 @@ impl neuro_sama::game::GameMut for State {
                         let target = target.ship_manager_mut().unwrap();
                         if let Some(system) = target.system_mut(system) {
                             let system = ptr::addr_of_mut!(*system);
+                            let drone_count = gui.ship_manager().unwrap().drone_count();
+                            let jumping = gui.ship_manager().unwrap().b_jumping;
+                            let dying = gui.ship_manager().unwrap().b_destroyed;
                             let hack = gui
                                 .ship_manager_mut()
                                 .unwrap()
@@ -1030,6 +1044,10 @@ impl neuro_sama::game::GameMut for State {
                                 .unwrap();
                             if hack.b_blocked {
                                 Err(Cow::from("can't hack a ship with Zoltan super shields").into())
+                            } else if jumping {
+                                Err(Cow::from("currently jumping, not launching the drone").into())
+                            } else if dying {
+                                Err(Cow::from("currently dying, not launching the drone").into())
                             } else if hack.base.i_lock_count == -1 || hack.base.i_lock_count > 0 {
                                 Err(
                                     Cow::from("the hacking system can't be controlled at the time")
@@ -1051,14 +1069,20 @@ impl neuro_sama::game::GameMut for State {
                             } else if !hack.base.functioning() {
                                 Err(Cow::from("the hacking system is not powered at the moment")
                                     .into())
+                            } else if drone_count == 0 {
+                                Err(Cow::from(
+                                    "you need to have a drone part to launch a hacking drone",
+                                )
+                                .into())
                             } else {
                                 hack.queued_system = system;
+                                hack.b_armed = false;
                                 Ok(Cow::from("successfully launched a drone").into())
                             }
                         } else {
                             let system = system.to_string();
                             Err(Cow::from(format!(
-                                "the enemy ship doesn't have {} system",
+                                "the enemy ship doesn't have {}",
                                 super::library().text(&system).unwrap_or(&system)
                             ))
                             .into())
@@ -1133,17 +1157,26 @@ impl neuro_sama::game::GameMut for State {
                                 .v_crew_list
                                 .iter()
                                 .copied()
-                                .filter(|x| unsafe { xc(*x).unwrap() }.i_room_id != room.i_room_id)
+                                .filter(|x| unsafe { xc(*x).unwrap() }.i_room_id == room.i_room_id)
                                 .collect::<Vec<_>>();
-                            let mind = gui.ship_manager_mut().unwrap().mind_system_mut().unwrap();
-                            mind.i_queued_target = room.i_room_id;
-                            mind.i_queued_ship = ship_id;
-                            let mut b = bindings::Vector::with_capacity(c.len());
-                            for x in c {
-                                b.push(x);
+                            if c.is_empty() {
+                                Err(Cow::from(format!(
+                                    "no crew in enemy ship's room {}",
+                                    event.target_room_id
+                                ))
+                                .into())
+                            } else {
+                                let mind =
+                                    gui.ship_manager_mut().unwrap().mind_system_mut().unwrap();
+                                mind.i_queued_target = room.i_room_id;
+                                mind.i_queued_ship = ship_id;
+                                let mut b = bindings::Vector::with_capacity(c.len());
+                                for x in c {
+                                    b.push(x);
+                                }
+                                mind.queued_crew = b;
+                                Ok(Cow::from("successfully activated mind control").into())
                             }
-                            mind.queued_crew = b;
-                            Ok(Cow::from("successfully activated mind control").into())
                         } else {
                             Err(Cow::from(format!(
                                 "room {} not found in this ship",
@@ -1338,11 +1371,9 @@ impl neuro_sama::game::GameMut for State {
                     FtlActions::TeleportSend(event) => {
                         (self.actions.valid(&event), true, event.target_room_id)
                     }
-                    FtlActions::TeleportReturn(event) => (
-                        self.actions.valid(&event),
-                        false,
-                        Some(event.source_room_id),
-                    ),
+                    FtlActions::TeleportReturn(event) => {
+                        (self.actions.valid(&event), false, event.source_room_id)
+                    }
                     _ => unreachable!(),
                 };
                 if !valid {
@@ -1377,10 +1408,10 @@ impl neuro_sama::game::GameMut for State {
                         Err(Cow::from("the teleporter system is not powered at the moment").into())
                     } else {
                         gui.combat_control.teleport_command = bindings::Pair {
-                            first: room.map(c_int::from).unwrap_or(-1),
+                            first: c_int::from(room),
                             second: if send { 1 } else { 2 },
                         };
-                        Ok(Cow::from("queued the teleporter system command").into())
+                        Ok(Cow::from("queued the teleporter system command, it will only work if there's any crew to actually teleport").into())
                     }
                 }
             }
@@ -1419,9 +1450,15 @@ impl neuro_sama::game::GameMut for State {
                         let all_doors: BTreeMap<c_int, *mut Door> = if air {
                             ship.v_door_list
                                 .iter()
-                                .chain(ship.v_outer_airlocks.iter())
                                 .copied()
                                 .map(|door| (unsafe { xc(door).unwrap() }.i_door_id, door))
+                                .chain(
+                                    ship.v_outer_airlocks
+                                        .iter()
+                                        .copied()
+                                        .enumerate()
+                                        .map(|(i, door)| (-(i as c_int + 1), door)),
+                                )
                                 .collect()
                         } else {
                             ship.v_door_list
@@ -1443,27 +1480,31 @@ impl neuro_sama::game::GameMut for State {
                                 if doors.is_empty() {
                                     for door in all_doors.into_values() {
                                         let door = unsafe { xm(door).unwrap() };
-                                        if open {
-                                            door.open();
-                                        } else {
-                                            door.close();
+                                        if door.i_hacked <= 0 && door.b_open != open {
+                                            if open {
+                                                door.open();
+                                            } else {
+                                                door.close();
+                                            }
                                         }
                                     }
                                 }
                                 let mut hacked = Vec::new();
                                 for door in &doors {
                                     let door = unsafe { &**door };
-                                    if door.i_hacked > 0 {
+                                    if door.i_hacked > 0 && door.b_open != open {
                                         hacked.push(door.i_door_id.to_string());
                                     }
                                 }
                                 if hacked.is_empty() {
                                     for door in doors {
                                         let door = unsafe { xm(door).unwrap() };
-                                        if open {
-                                            door.open();
-                                        } else {
-                                            door.close();
+                                        if door.i_hacked <= 0 && door.b_open != open {
+                                            if open {
+                                                door.open();
+                                            } else {
+                                                door.close();
+                                            }
                                         }
                                     }
                                     if open {
@@ -1494,9 +1535,21 @@ impl neuro_sama::game::GameMut for State {
                     let gui = app.gui().unwrap();
                     let ship = &gui.ship_manager().unwrap().ship;
                     let mut graph = ShipGraph::default();
-                    for door in ship.v_door_list.iter().chain(ship.v_outer_airlocks.iter()) {
-                        let door = unsafe { xc(*door).unwrap() };
-                        graph.add_door(door.i_door_id, door.i_room1, door.i_room2);
+                    for (i, door) in ship
+                        .v_door_list
+                        .iter()
+                        .copied()
+                        .map(|door| (unsafe { xc(door).unwrap() }.i_door_id, door))
+                        .chain(
+                            ship.v_outer_airlocks
+                                .iter()
+                                .copied()
+                                .enumerate()
+                                .map(|(i, door)| (-(i as c_int + 1), door)),
+                        )
+                    {
+                        let door = unsafe { xc(door).unwrap() };
+                        graph.add_door(i, door.i_room1, door.i_room2);
                     }
                     match graph
                         .shortest_path(event.first_room_id.into(), event.second_room_id.into())
@@ -1721,10 +1774,10 @@ impl neuro_sama::game::GameMut for State {
                         [Ok(p1), Ok(p2)] => {
                             let s1 = unsafe { xm(p1) };
                             let s2 = unsafe { xm(p2) };
-                            if !s1.as_ref().is_some_and(|x| !x.item.is_empty()) {
-                                Err(Cow::from("slot1 is empty").into())
-                            } else if !s2.as_ref().is_some_and(|x| !x.item.is_empty()) {
-                                Err(Cow::from("slot2 is empty").into())
+                            if !s1.as_ref().is_some_and(|x| !x.item.is_empty())
+                                && !s2.as_ref().is_some_and(|x| !x.item.is_empty())
+                            {
+                                Err(Cow::from("both slots are empty").into())
                             } else if p1 == p2 {
                                 Err(Cow::from("slot1 and slot2 are the same").into())
                             } else {
@@ -1788,10 +1841,18 @@ impl neuro_sama::game::GameMut for State {
                                     Err(Cow::from("slot2 holds no items").into())
                                 } else {
                                     unsafe {
-                                        v1.remove_item(s1);
-                                        v2.remove_item(s2);
-                                        v1.add_item(s1, i1);
-                                        v2.add_item(s2, i2);
+                                        if !i1.is_empty() {
+                                            v1.remove_item(s1);
+                                        }
+                                        if !i2.is_empty() {
+                                            v2.remove_item(s2);
+                                        }
+                                        if !i2.is_empty() {
+                                            v1.add_item(s1, i2);
+                                        }
+                                        if !i1.is_empty() {
+                                            v2.add_item(s2, i1);
+                                        }
                                     }
                                     Ok(Cow::from("successfully swapped the slots").into())
                                 }
@@ -2016,7 +2077,7 @@ impl neuro_sama::game::GameMut for State {
                     }
                 }
             }
-            FtlActions::Starmap(event) => {
+            FtlActions::StarMap(event) => {
                 if !self.actions.valid(&event) {
                     Err(Cow::from("can't open the starmap").into())
                 } else {
@@ -2026,9 +2087,24 @@ impl neuro_sama::game::GameMut for State {
                         .system(System::Engines)
                         .is_some_and(|x| x.functioning())
                     {
-                        Err(Cow::from("the ship's engines aren't functioning").into())
+                        Err(
+                            Cow::from("Your Engine System must be functioning in order to Jump.")
+                                .into(),
+                        )
                     } else if !ship.system(System::Pilot).is_some_and(|x| x.functioning()) {
-                        Err(Cow::from("the ship's piloting subsystem isn't functioning (note that it has to be manned)").into())
+                        if ship.system(System::Pilot).is_some_and(|x| {
+                            x.powered() && (!x.b_under_attack || x.i_hack_effect <= 1)
+                        }) {
+                            Err(Cow::from(
+                                "You must have a crewmember in the Pilot System to Jump.",
+                            )
+                            .into())
+                        } else {
+                            Err(Cow::from(
+                                "Your Pilot System must be functioning in order to Jump.",
+                            )
+                            .into())
+                        }
                     } else if ship.jump_timer.first < ship.jump_timer.second {
                         Err(Cow::from("the ship's FTL drive hasn't yet charged").into())
                     } else {
@@ -2125,9 +2201,6 @@ impl neuro_sama::game::GameMut for State {
                             .find(|(_, x)| **x == *path)
                             .unwrap()
                             .0 as i32;
-                        unsafe {
-                            s.base.vtable().close(ptr::addr_of_mut!(s.base));
-                        }
                         Ok(Cow::from("jumping...").into())
                     } else {
                         Err(Cow::from("there's no path in the direction you've chosen").into())
@@ -2251,7 +2324,9 @@ impl neuro_sama::game::GameMut for State {
                     match slot {
                         Err(err) => Err(err),
                         Ok(slot) => {
+                            e.b_selling_item = true;
                             e.b_dragging = true;
+                            assert!(e.b_selling_item);
                             e.dragging_equip_box = e
                                 .v_equipment_boxes
                                 .iter()
@@ -2263,6 +2338,7 @@ impl neuro_sama::game::GameMut for State {
                                 e.base.vtable().mouse_up(ptr::addr_of_mut!(e.base), 0, 0);
                             }
                             e.b_dragging = false;
+                            e.b_selling_item = false;
                             Ok(Cow::from("successfully sold the item").into())
                         }
                     }
@@ -2698,7 +2774,7 @@ fn available_actions(app: &CApp) -> ActionDb {
             }
             ret.actions.insert(actions::Jump::name(), meta);
         }
-        if s.end_button.base.b_active {
+        if s.end_button.base.b_active && !s.b_choosing_new_sector {
             ret.add::<actions::NextSector>();
         }
         return ret;
@@ -2748,18 +2824,19 @@ fn available_actions(app: &CApp) -> ActionDb {
         return ret;
     }
     if gui.store_screens.base.b_open {
-        // TODO
-        if gui.store_screens.current_tab == 0 {
-            let store = app
-                .world()
-                .unwrap()
-                .base_location_event()
-                .unwrap()
-                .store()
-                .unwrap();
-            if store.exit_button.base.b_active {
-                ret.add::<actions::Back>();
-            }
+        let store = app
+            .world()
+            .unwrap()
+            .base_location_event()
+            .unwrap()
+            .store()
+            .unwrap();
+        if gui.equip_screen.base.b_open {
+            ret.add::<actions::SwapInventorySlots>();
+            ret.add::<actions::Sell>();
+            ret.add::<actions::BuyScreen>();
+        }
+        if store.base.b_open {
             if store.page2.base.b_active || store.page1.base.b_active {
                 ret.add::<actions::SwitchStorePage>();
             }
@@ -2827,11 +2904,8 @@ fn available_actions(app: &CApp) -> ActionDb {
                 ret.add::<actions::Repair1>();
                 ret.add::<actions::RepairAll>();
             }
-        } else {
-            ret.add::<actions::BuyScreen>();
-            ret.add::<actions::Sell>();
-            // equip, with sell = true
         }
+        ret.add::<actions::Back>();
         return ret;
     }
     if gui.ship_screens.base.b_open {
@@ -2876,7 +2950,7 @@ fn available_actions(app: &CApp) -> ActionDb {
                 ret.actions.insert(name, meta);
             }
         }
-        if gui.equip_screen.base.b_open && !gui.equip_screen.b_selling_item {
+        if gui.equip_screen.base.b_open {
             ret.add::<actions::SwapInventorySlots>();
         }
         if gui.upgrade_screen.base.b_open {
@@ -2941,7 +3015,7 @@ fn available_actions(app: &CApp) -> ActionDb {
         ret.add::<actions::PauseGame>();
     }
     if gui.ftl_button.base.base.b_active {
-        ret.add::<actions::Starmap>();
+        ret.add::<actions::StarMap>();
     }
     // upgrade button (open ship_screens)
     if gui.upgrade_button.base.b_active {
@@ -3000,13 +3074,8 @@ fn available_actions(app: &CApp) -> ActionDb {
         }
         ret.actions.insert(name, meta);
     }
-    if gui.ship_manager().unwrap().has_system(System::Weapons) {
-        let count = gui
-            .ship_manager()
-            .unwrap()
-            .weapon_system()
-            .unwrap()
-            .slot_count;
+    if let Some(sys) = gui.ship_manager().unwrap().weapon_system() {
+        let count = sys.slot_count;
         for (name, mut meta) in [
             (
                 actions::ActivateWeapon::name(),
@@ -3038,13 +3107,8 @@ fn available_actions(app: &CApp) -> ActionDb {
             ret.actions.insert(name, meta);
         }
     }
-    if gui.ship_manager().unwrap().has_system(System::Drones) {
-        let count = gui
-            .ship_manager()
-            .unwrap()
-            .drone_system()
-            .unwrap()
-            .slot_count;
+    if let Some(sys) = gui.ship_manager().unwrap().drone_system() {
+        let count = sys.slot_count;
         for (name, mut meta) in [
             (
                 actions::ActivateDrone::name(),
@@ -3072,98 +3136,40 @@ fn available_actions(app: &CApp) -> ActionDb {
             ret.actions.insert(name, meta);
         }
     }
-    if gui.ship_manager().unwrap().has_system(System::Hacking) {
-        if !gui
-            .ship_manager()
-            .unwrap()
-            .hacking_system()
-            .unwrap()
-            .b_hacking
-        {
+    if let Some(sys) = gui.ship_manager().unwrap().hacking_system() {
+        if !sys.b_hacking {
             ret.add::<actions::HackSystem>();
-        } else if gui
-            .ship_manager()
-            .unwrap()
-            .hacking_system()
-            .unwrap()
-            .base
-            .i_lock_count
-            == 0
-        {
+        } else if sys.base.i_lock_count == 0 {
             ret.add::<actions::ActivateHacking>();
         }
     }
-    if gui.ship_manager().unwrap().has_system(System::Mind)
-        && gui
-            .ship_manager()
-            .unwrap()
-            .mind_system()
-            .unwrap()
-            .base
-            .i_lock_count
-            == 0
-    {
-        ret.add::<actions::MindControl>();
+    if let Some(sys) = gui.ship_manager().unwrap().mind_system() {
+        if sys.base.i_lock_count == 0 {
+            ret.add::<actions::MindControl>();
+        }
     }
-    if gui.ship_manager().unwrap().has_system(System::Battery)
-        && gui
-            .ship_manager()
-            .unwrap()
-            .battery_system()
-            .unwrap()
-            .base
-            .i_lock_count
-            == 0
-        && !gui
-            .ship_manager()
-            .unwrap()
-            .battery_system()
-            .unwrap()
-            .b_turned_on
-    {
-        ret.add::<actions::ActivateBattery>();
+    if let Some(sys) = gui.ship_manager().unwrap().battery_system() {
+        if sys.base.i_lock_count == 0 && !sys.b_turned_on {
+            ret.add::<actions::ActivateBattery>();
+        }
     }
-    if gui.ship_manager().unwrap().has_system(System::Cloaking)
-        && gui
-            .ship_manager()
-            .unwrap()
-            .cloak_system()
-            .unwrap()
-            .base
-            .i_lock_count
-            == 0
-        && !gui
-            .ship_manager()
-            .unwrap()
-            .cloak_system()
-            .unwrap()
-            .b_turned_on
-    {
-        ret.add::<actions::ActivateCloaking>();
+    if let Some(sys) = gui.ship_manager().unwrap().cloak_system() {
+        if sys.base.i_lock_count == 0 && !sys.b_turned_on {
+            ret.add::<actions::ActivateCloaking>();
+        }
     }
-    if gui.ship_manager().unwrap().has_system(System::Teleporter)
-        && gui
-            .ship_manager()
-            .unwrap()
-            .cloak_system()
-            .unwrap()
-            .base
-            .i_lock_count
-            == 0
-    {
-        ret.add::<actions::TeleportSend>();
-        ret.add::<actions::TeleportReturn>();
+    if let Some(sys) = gui.ship_manager().unwrap().teleport_system() {
+        if sys.base.i_lock_count == 0 {
+            ret.add::<actions::TeleportSend>();
+            ret.add::<actions::TeleportReturn>();
+        }
     }
-    if gui.ship_manager().unwrap().has_system(System::Doors)
-        && gui
-            .ship_manager()
-            .unwrap()
-            .system(System::Doors)
-            .is_some_and(|x| x.i_lock_count == 0)
-    {
-        ret.add::<actions::OpenDoors>();
-        ret.add::<actions::CloseDoors>();
-        ret.add::<actions::PlanDoorRoute>();
+    if let Some(sys) = gui.ship_manager().unwrap().system(System::Doors) {
+        if sys.i_lock_count == 0 {
+            ret.add::<actions::OpenDoors>();
+            ret.add::<actions::CloseDoors>();
+            ret.add::<actions::PlanDoorRoute>();
+        }
     }
     ret.add::<actions::MoveCrew>();
     // gui.sys_control.sys_boxes - iterate to get all the systems
@@ -3349,7 +3355,7 @@ pub fn deactivate() {
         if let Some(game) = unsafe { GAME.get_mut() } {
             game.context("the mod just crashed... the game may or may not be still running, but you can no longer control it", false)
                 .unwrap();
-            game.tx = mpsc::channel(0).0;
+            game.tx = mpsc::channel(1).0;
         }
     });
 }
