@@ -149,7 +149,6 @@ impl ShipGraph {
     pub fn add_door(&mut self, id: c_int, a: c_int, b: c_int) {
         self.rooms.entry(a).or_default().push((id, b));
         self.rooms.entry(b).or_default().push((id, a));
-        log::info!("adding path {a}<-({id})->{b}");
     }
     pub fn shortest_path(
         &self,
@@ -160,13 +159,10 @@ impl ShipGraph {
         let mut vis = HashSet::new();
         q.push((usize::MAX, vec![], a));
         while let Some((level, path, room)) = q.pop() {
-            log::info!("popping {:?}", (level, &path, room));
             if room == b {
-                log::info!("reached");
                 return Ok(path);
             }
             if !vis.insert(room) {
-                log::info!("already visited {room}, skipping");
                 continue;
             }
             let Some(room) = self.rooms.get(&room) else {
@@ -178,7 +174,6 @@ impl ShipGraph {
                 }
                 let mut path = path.clone();
                 path.push(door);
-                log::info!("pushing {:?}", (level - 1, &path, room));
                 q.push((level - 1, path, room));
             }
         }
@@ -1344,7 +1339,6 @@ impl neuro_sama::game::GameMut for State {
                                 }
                                 b.current_button_mut().unwrap().base.b_hover = true;
                                 b.base.base.mouse_hover = false;
-                                log::debug!("{:?}", b.base.base.vtable().mouse_click);
                                 unsafe {
                                     b.base
                                         .base
@@ -3362,7 +3356,6 @@ pub fn deactivate() {
 
 pub unsafe fn loop_hook(app: *mut CApp) {
     if !activated() {
-        log::trace!("deactivated");
         return;
     }
     if !app.is_null() {
