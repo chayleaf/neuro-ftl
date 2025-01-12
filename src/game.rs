@@ -362,13 +362,15 @@ impl neuro_sama::game::GameMut for State {
             }
             FtlActions::RenameCrew(event) => {
                 if self.actions.valid(&event) {
-                    if app.menu.ship_builder.b_open {
+                    if event.crew_member_index == 0 {
+                        Err(Cow::from("crew member out of range").into())
+                    } else if app.menu.ship_builder.b_open {
                         if let Some(member) = app
                             .menu
                             .ship_builder
                             .v_crew_boxes
                             .iter()
-                            .nth(event.crew_member_index.into())
+                            .nth((event.crew_member_index - 1).into())
                         {
                             let member = unsafe { xm(*member).unwrap() };
                             member.base.b_quick_renaming = true;
@@ -414,7 +416,7 @@ impl neuro_sama::game::GameMut for State {
                         .ship_manager()
                         .unwrap()
                         .v_crew_list
-                        .get(event.crew_member_index.into())
+                        .get((event.crew_member_index - 1).into())
                         .copied()
                     {
                         let crew = &mut app.gui_mut().unwrap().crew_screen;
@@ -845,13 +847,14 @@ impl neuro_sama::game::GameMut for State {
                         .into())
                     } else {
                         let cc = &app.gui().unwrap().combat_control;
-                        if usize::from(index) >= cc.drone_control.base.boxes.len() {
+                        if index > 0 && usize::from(index - 1) >= cc.drone_control.base.boxes.len()
+                        {
                             Err(Cow::from("index out of range").into())
                         } else if let Some(b) = cc
                             .drone_control
                             .base
                             .boxes
-                            .get(index.into())
+                            .get((index - 1).into())
                             .map(|x| x.cast::<bindings::DroneBox>())
                             .map(|x| unsafe { xc(x).unwrap() })
                             .filter(|x| x.drone().is_some())
@@ -951,13 +954,13 @@ impl neuro_sama::game::GameMut for State {
                         .into())
                     } else {
                         let cc = &app.gui().unwrap().combat_control;
-                        if usize::from(index) >= cc.weap_control.base.boxes.len() {
+                        if index > 0 && usize::from(index - 1) >= cc.weap_control.base.boxes.len() {
                             Err(Cow::from("index out of range").into())
                         } else if let Some(b) = cc
                             .weap_control
                             .base
                             .boxes
-                            .get(index.into())
+                            .get((index - 1).into())
                             .map(|x| x.cast::<bindings::WeaponBox>())
                             .map(|x| unsafe { xc(x).unwrap() })
                             .filter(|x| x.weapon().is_some())
@@ -1705,10 +1708,13 @@ impl neuro_sama::game::GameMut for State {
                              r#type: kind,
                              index,
                          }| {
-                            let index = usize::from(index);
+                            if index == 0 {
+                                return Err(Some(Cow::from("indices start at 1")));
+                            }
                             match kind {
                                 InventorySlotType::Cargo => {
                                     let b = e.boxes::<bindings::EquipmentBox>();
+                                    let index = usize::from(index - 1);
                                     b.get(index).copied().ok_or_else(|| {
                                         Some(Cow::from(format!(
                                             "there are only {} cargo slots",
@@ -1718,6 +1724,7 @@ impl neuro_sama::game::GameMut for State {
                                 }
                                 InventorySlotType::Weapon => {
                                     let b = e.boxes::<bindings::WeaponEquipBox>();
+                                    let index = usize::from(index - 1);
                                     b.get(index).copied().ok_or_else(|| {
                                         Some(Cow::from(format!(
                                             "there are only {} weapon slots",
@@ -1727,6 +1734,7 @@ impl neuro_sama::game::GameMut for State {
                                 }
                                 InventorySlotType::Drone => {
                                     let b = e.boxes::<bindings::DroneEquipBox>();
+                                    let index = usize::from(index - 1);
                                     b.get(index).copied().ok_or_else(|| {
                                         Some(Cow::from(format!(
                                             "there are only {} drone slots",
@@ -1736,6 +1744,7 @@ impl neuro_sama::game::GameMut for State {
                                 }
                                 InventorySlotType::Augmentation => {
                                     let b = e.boxes::<bindings::AugmentEquipBox>();
+                                    let index = usize::from(index - 1);
                                     b.get(index).copied().ok_or_else(|| {
                                         Some(Cow::from(format!(
                                             "there are only {} augment slots",
@@ -2018,11 +2027,13 @@ impl neuro_sama::game::GameMut for State {
                     Err(Cow::from("can't fire crew members at the time").into())
                 } else {
                     let gui = app.gui_mut().unwrap();
-                    if let Some(c) = gui
+                    if event.crew_member_index == 0 {
+                        Err(Cow::from("crew member out of range").into())
+                    } else if let Some(c) = gui
                         .ship_manager()
                         .unwrap()
                         .v_crew_list
-                        .get(event.crew_member_index.into())
+                        .get((event.crew_member_index - 1).into())
                         .copied()
                     {
                         let crew = &mut gui.crew_screen;
@@ -2265,16 +2276,20 @@ impl neuro_sama::game::GameMut for State {
                         r#type: kind,
                         index,
                     } = event.slot;
-                    let index = usize::from(index);
+                    if index == 0 {
+                        return Err(Some(Cow::from("indices start at 1")));
+                    }
                     let slot = match kind {
                         InventorySlotType::Cargo => {
                             let b = e.boxes::<bindings::EquipmentBox>();
+                            let index = usize::from(index - 1);
                             b.get(index).copied().ok_or_else(|| {
                                 Some(Cow::from(format!("there are only {} cargo slots", b.len())))
                             })
                         }
                         InventorySlotType::Weapon => {
                             let b = e.boxes::<bindings::WeaponEquipBox>();
+                            let index = usize::from(index - 1);
                             b.get(index).copied().ok_or_else(|| {
                                 Some(Cow::from(format!(
                                     "there are only {} weapon slots",
@@ -2284,12 +2299,14 @@ impl neuro_sama::game::GameMut for State {
                         }
                         InventorySlotType::Drone => {
                             let b = e.boxes::<bindings::DroneEquipBox>();
+                            let index = usize::from(index - 1);
                             b.get(index).copied().ok_or_else(|| {
                                 Some(Cow::from(format!("there are only {} drone slots", b.len())))
                             })
                         }
                         InventorySlotType::Augmentation => {
                             let b = e.boxes::<bindings::AugmentEquipBox>();
+                            let index = usize::from(index - 1);
                             b.get(index).copied().ok_or_else(|| {
                                 Some(Cow::from(format!(
                                     "there are only {} augment slots",
@@ -2405,7 +2422,8 @@ impl neuro_sama::game::GameMut for State {
                         (_, FtlActions::RepairAll(_)) => boxes.iter().find(|x| {
                             unsafe { xc(x.cast::<bindings::RepairStoreBox>()).unwrap() }.repair_all
                         }),
-                        (index, _) => boxes.get(usize::from(index)),
+                        (0, _) => None,
+                        (index, _) => boxes.get(usize::from(index - 1)),
                     }
                     .copied();
                     if let Some(c) = b {
@@ -2608,6 +2626,47 @@ impl ActionDb {
     }
 }
 
+fn set_prop_range<T: Copy + Into<serde_json::Number>>(
+    schema: &mut schemars::Schema,
+    name: impl AsRef<str>,
+    range: std::ops::RangeInclusive<T>,
+) {
+    let min: serde_json::Number = (*range.start()).into();
+    let max: serde_json::Number = (*range.end()).into();
+    let prop = schema
+        .as_object_mut()
+        .unwrap()
+        .get_mut("properties")
+        .unwrap()
+        .get_mut(name.as_ref())
+        .unwrap()
+        .as_object_mut()
+        .unwrap();
+    prop.insert("minimum".to_owned(), min.into());
+    prop.insert("maximum".to_owned(), max.into());
+}
+
+fn set_prop_enum(
+    schema: &mut schemars::Schema,
+    name: impl AsRef<str>,
+    keep: impl FnMut(&mut serde_json::Value) -> bool,
+) {
+    let prop = schema
+        .as_object_mut()
+        .unwrap()
+        .get_mut("properties")
+        .unwrap()
+        .get_mut(name.as_ref())
+        .unwrap()
+        .as_object_mut()
+        .unwrap();
+    prop.get_mut("enum")
+        .unwrap()
+        .as_array_mut()
+        .unwrap()
+        .retain_mut(keep);
+}
+
 fn available_actions(app: &CApp) -> ActionDb {
     let mut ret = ActionDb::default();
     if app.lang_chooser.base.b_open {
@@ -2636,20 +2695,11 @@ fn available_actions(app: &CApp) -> ActionDb {
             // TODO: (?) difficulty selection actions, enable advanced edition action
             ret.add::<actions::RenameCrew>();
             let mut meta = meta::<actions::RenameCrew>();
-            match meta
-                .schema
-                .schema
-                .object()
-                .properties
-                .get_mut("crewMemberIndex")
-                .unwrap()
-            {
-                schemars::schema::Schema::Object(x) => {
-                    x.number.as_mut().unwrap().minimum = Some(0.0);
-                    x.number.as_mut().unwrap().maximum = Some(s.v_crew_boxes.len() as f64 - 1.0);
-                }
-                _ => panic!(),
-            }
+            set_prop_range(
+                &mut meta.schema,
+                "crewMemberIndex",
+                1..=s.v_crew_boxes.len(),
+            );
             ret.actions.insert(actions::RenameCrew::name(), meta);
             ret.add::<actions::RenameShip>();
             ret.add::<actions::StartGame>();
@@ -2728,22 +2778,9 @@ fn available_actions(app: &CApp) -> ActionDb {
             let sec = s.current_sector().unwrap();
             let secs: HashSet<_> = sec.neighbors().into_keys().map(|x| x.to_str()).collect();
             let mut meta = meta::<actions::ChooseNextSector>();
-            match meta
-                .schema
-                .schema
-                .object()
-                .properties
-                .get_mut("direction")
-                .unwrap()
-            {
-                schemars::schema::Schema::Object(x) => {
-                    x.enum_values
-                        .as_mut()
-                        .unwrap()
-                        .retain(|x| secs.contains(x.as_str().unwrap()));
-                }
-                _ => panic!(),
-            }
+            set_prop_enum(&mut meta.schema, "direction", |x| {
+                secs.contains(x.as_str().unwrap())
+            });
             ret.actions.insert(actions::ChooseNextSector::name(), meta);
         } else if s.wait_button.base.b_active {
             ret.add::<actions::Wait>();
@@ -2751,22 +2788,9 @@ fn available_actions(app: &CApp) -> ActionDb {
             let loc = s.current_loc().unwrap();
             let locs: HashSet<_> = loc.neighbors().into_keys().map(|x| x.to_str()).collect();
             let mut meta = meta::<actions::Jump>();
-            match meta
-                .schema
-                .schema
-                .object()
-                .properties
-                .get_mut("direction")
-                .unwrap()
-            {
-                schemars::schema::Schema::Object(x) => {
-                    x.enum_values
-                        .as_mut()
-                        .unwrap()
-                        .retain(|x| locs.contains(x.as_str().unwrap()));
-                }
-                _ => panic!(),
-            }
+            set_prop_enum(&mut meta.schema, "direction", |x| {
+                locs.contains(x.as_str().unwrap())
+            });
             ret.actions.insert(actions::Jump::name(), meta);
         }
         if s.end_button.base.b_active && !s.b_choosing_new_sector {
@@ -2845,14 +2869,13 @@ fn available_actions(app: &CApp) -> ActionDb {
                 if boxes.is_empty() {
                     return;
                 }
-                if let Some(schemars::schema::Schema::Object(x)) =
-                    meta.schema.schema.object().properties.get_mut("index")
-                {
-                    x.number.as_mut().unwrap().minimum = Some(0.0);
-                    x.number.as_mut().unwrap().maximum = Some(boxes.len() as f64 - 1.0);
-                } else if let Some(schemars::schema::Schema::Object(x)) =
-                    meta.schema.schema.object().properties.get_mut("item")
-                {
+                let obj = meta.schema.get("properties").unwrap().as_object().unwrap();
+                let has_index = obj.contains_key("index");
+                let has_item = obj.contains_key("item");
+                let has_system = obj.contains_key("system");
+                if has_index {
+                    set_prop_range(&mut meta.schema, "index", 1..=boxes.len());
+                } else if has_item {
                     let items: HashSet<_> = boxes
                         .iter()
                         .map(|x| x.cast::<bindings::ItemStoreBox>())
@@ -2863,13 +2886,10 @@ fn available_actions(app: &CApp) -> ActionDb {
                         })
                         .map(|x| x.to_str())
                         .collect();
-                    x.enum_values
-                        .as_mut()
-                        .unwrap()
-                        .retain(|x| items.contains(x.as_str().unwrap()));
-                } else if let Some(schemars::schema::Schema::Object(x)) =
-                    meta.schema.schema.object().properties.get_mut("system")
-                {
+                    set_prop_enum(&mut meta.schema, "item", |x| {
+                        items.contains(x.as_str().unwrap())
+                    });
+                } else if has_system {
                     let systems: HashSet<_> = boxes
                         .iter()
                         .map(|x| x.cast::<bindings::SystemStoreBox>())
@@ -2880,10 +2900,9 @@ fn available_actions(app: &CApp) -> ActionDb {
                                 .unwrap_or_default()
                         })
                         .collect();
-                    x.enum_values
-                        .as_mut()
-                        .unwrap()
-                        .retain(|x| systems.contains(x.as_str().unwrap()));
+                    set_prop_enum(&mut meta.schema, "system", |x| {
+                        systems.contains(x.as_str().unwrap())
+                    });
                 } else {
                     panic!()
                 }
@@ -2928,20 +2947,7 @@ fn available_actions(app: &CApp) -> ActionDb {
                 (actions::RenameCrew::name(), meta::<actions::RenameCrew>()),
                 (actions::FireCrew::name(), meta::<actions::FireCrew>()),
             ] {
-                match meta
-                    .schema
-                    .schema
-                    .object()
-                    .properties
-                    .get_mut("crewMemberIndex")
-                    .unwrap()
-                {
-                    schemars::schema::Schema::Object(x) => {
-                        x.number.as_mut().unwrap().minimum = Some(0.0);
-                        x.number.as_mut().unwrap().maximum = Some(crew_count as f64 - 1.0);
-                    }
-                    _ => panic!(),
-                }
+                set_prop_range(&mut meta.schema, "crewMemberIndex", 1..=crew_count);
                 ret.actions.insert(name, meta);
             }
         }
@@ -2968,21 +2974,9 @@ fn available_actions(app: &CApp) -> ActionDb {
                 systems.insert(sys.to_string());
             }
             let mut meta = meta::<actions::UpgradeSystem>();
-            match meta
-                .schema
-                .schema
-                .object()
-                .properties
-                .get_mut("system")
-                .unwrap()
-            {
-                schemars::schema::Schema::Bool(_) => panic!(),
-                schemars::schema::Schema::Object(s) => s
-                    .enum_values
-                    .as_mut()
-                    .unwrap()
-                    .retain(|x| systems.contains(x.as_str().unwrap())),
-            }
+            set_prop_enum(&mut meta.schema, "system", |x| {
+                systems.contains(x.as_str().unwrap())
+            });
             ret.actions.insert(actions::UpgradeSystem::name(), meta);
             if gui.upgrade_screen.undo_button.base.b_active {
                 ret.add::<actions::UndoUpgrades>();
@@ -3048,25 +3042,15 @@ fn available_actions(app: &CApp) -> ActionDb {
             meta::<actions::DecreasePower>(),
         ),
     ] {
-        match meta
-            .schema
-            .schema
-            .object()
-            .properties
-            .get_mut("system")
-            .unwrap()
-        {
-            schemars::schema::Schema::Bool(_) => panic!(),
-            schemars::schema::Schema::Object(s) => s.enum_values.as_mut().unwrap().retain(|x| {
-                systems.get(x.as_str().unwrap()).is_some_and(|s| {
-                    gui.sys_control
-                        .ship_manager()
-                        .unwrap()
-                        .system(*s)
-                        .is_some_and(|x| x.b_needs_power)
-                })
-            }),
-        }
+        set_prop_enum(&mut meta.schema, "system", |x| {
+            systems.get(x.as_str().unwrap()).is_some_and(|s| {
+                gui.sys_control
+                    .ship_manager()
+                    .unwrap()
+                    .system(*s)
+                    .is_some_and(|x| x.b_needs_power)
+            })
+        });
         ret.actions.insert(name, meta);
     }
     if let Some(sys) = gui.ship_manager().unwrap().weapon_system() {
@@ -3085,20 +3069,7 @@ fn available_actions(app: &CApp) -> ActionDb {
                 meta::<actions::SetWeaponTargets>(),
             ),
         ] {
-            match meta
-                .schema
-                .schema
-                .object()
-                .properties
-                .get_mut("weaponIndex")
-                .unwrap()
-            {
-                schemars::schema::Schema::Object(x) => {
-                    x.number.as_mut().unwrap().minimum = Some(0.0);
-                    x.number.as_mut().unwrap().maximum = Some(count as f64 - 1.0);
-                }
-                _ => panic!(),
-            }
+            set_prop_range(&mut meta.schema, "weaponIndex", 1..=count);
             ret.actions.insert(name, meta);
         }
     }
@@ -3114,20 +3085,7 @@ fn available_actions(app: &CApp) -> ActionDb {
                 meta::<actions::DeactivateDrone>(),
             ),
         ] {
-            match meta
-                .schema
-                .schema
-                .object()
-                .properties
-                .get_mut("droneIndex")
-                .unwrap()
-            {
-                schemars::schema::Schema::Object(x) => {
-                    x.number.as_mut().unwrap().minimum = Some(0.0);
-                    x.number.as_mut().unwrap().maximum = Some(count as f64 - 1.0);
-                }
-                _ => panic!(),
-            }
+            set_prop_range(&mut meta.schema, "droneIndex", 1..=count);
             ret.actions.insert(name, meta);
         }
     }

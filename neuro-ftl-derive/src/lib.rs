@@ -185,14 +185,14 @@ fn derive_json_schema_no_ref2(input: TokenStream) -> TokenStream {
             fn schema_id() -> std::borrow::Cow<'static, str> {
                 #private_ident::#name::schema_id()
             }
-            fn schema_name() -> String {
+            fn schema_name() -> std::borrow::Cow<'static, str> {
                 #private_ident::#name::schema_name()
             }
-            fn json_schema(gen: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+            fn json_schema(gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
                 #private_ident::#name::json_schema(gen)
             }
-            fn is_referenceable() -> bool {
-                false
+            fn always_inline_schema() -> bool {
+                true
             }
         }
     }
