@@ -1,13 +1,19 @@
-use std::{borrow::Cow, cmp::Ordering};
+use std::borrow::Cow;
 
 use neuro_ftl_derive::Delta;
 use serde::Serialize;
 
+use crate::{impl_delta, impl_delta1};
+
 use super::strings::{self, text};
+
+pub mod util;
+
+use util::*;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PlayerShipInfo {
+pub struct PlayerShipInfo {
     pub hull: Help<i32>,
     pub max_hull: i32,
     pub drone_count: Help<i32>,
@@ -16,19 +22,68 @@ struct PlayerShipInfo {
     pub scrap_count: Help<i32>,
 }
 
-pub trait HasId<'a> {
-    type Id: Ord;
-    /// Unique string ID for Neuro to refer to this item by. For crew, this is the crewmember name,
-    /// for weapons, this is the weapon name, for systems, this is the system ID, for drones, this
-    /// the augment name, for rooms, there's nothing (I could use system IDs but there's way too
-    /// much empty rooms), for doors, I *could* tag them by their neighbor room IDs, but the issue
-    /// is there are sometimes two airlocks per room (and idk some ships may or may not have
-    /// multiple doors between two rooms), so that's kinda a no go.
-    ///
-    /// If there's a second one, the second one gets a (1) added, then (2), etc. However, it should
-    /// be implemented in this method, because it just makes sense, otherwise actions won't really
-    /// be able to function properly I think.
-    fn id(&'a self) -> Self::Id;
+#[derive(Clone, Debug, Serialize, Delta)]
+#[serde(rename_all = "camelCase")]
+pub struct WeaponInfo {
+    #[serde(skip_serializing_if = "is_zero_u8")]
+    pub damage: u8,
+    #[serde(skip_serializing_if = "is_zero_u8")]
+    pub shield_piercing: u8,
+    // *10
+    #[serde(skip_serializing_if = "is_zero_u8")]
+    pub fire_chance_percentage: u8,
+    // *10
+    #[serde(skip_serializing_if = "is_zero_u8")]
+    pub breach_chance_percentage: u8,
+    // *10
+    #[serde(skip_serializing_if = "is_zero_u8")]
+    pub stun_chance_percentage: u8,
+    #[serde(skip_serializing_if = "is_zero_u8")]
+    pub stun_duration: u8,
+    #[serde(skip_serializing_if = "is_zero_u8")]
+    pub ion_damage: u8,
+    #[serde(skip_serializing_if = "is_zero_u8")]
+    pub system_damage: u8,
+    #[serde(skip_serializing_if = "is_zero_u8")]
+    pub crew_damage: u8,
+    // must be set to damage * 2 if hull_buster != 0
+    #[serde(skip_serializing_if = "is_zero_u8")]
+    pub hull_damage: u8,
+    #[serde(skip_serializing_if = "is_false")]
+    pub lockdowns_room: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub can_target_own_ship: bool,
+
+    #[serde(skip_serializing_if = "is_false")]
+    pub uses_missiles: bool,
+    #[serde(skip_serializing_if = "is_zero_u8")]
+    pub required_power: u8,
+    #[serde(skip_serializing_if = "is_zero_u8")]
+    pub cooldown: u8,
+    #[serde(skip_serializing_if = "is_zero_u8")]
+    pub healing: u8,
+    #[serde(skip_serializing_if = "is_zero_u8")]
+    pub bonus_hull_damage: u8,
+    #[serde(skip_serializing_if = "is_zero_u8")]
+    pub projectile_speed: u8,
+}
+
+#[derive(Clone, Debug, Serialize, Delta)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemLevel {
+    pub effect: Cow<'static, str>,
+    pub level: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost: Option<u8>,
+    pub purchased: bool,
+    pub active: bool,
+}
+
+impl<'a> HasId<'a> for SystemLevel {
+    type Id = u8;
+    fn id(&'a self) -> Self::Id {
+        self.level
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Delta)]
@@ -38,7 +93,7 @@ pub struct SystemInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub room_id: Option<u8>,
     pub name: Cow<'static, str>,
-    pub functioning: bool,
+    pub description: Cow<'static, str>,
     pub hp: u8,
     pub max_hp: u8,
     pub can_be_manned: bool,
@@ -48,6 +103,8 @@ pub struct SystemInfo {
     pub power: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_power: Option<u8>,
+    pub levels: Vec<SystemLevel>,
+    pub active: bool,
     pub level: u8,
     pub max_level: u8,
     // Some(false) or Some(true) if this is e.g. cloaking, None if this is something that doesnt
@@ -188,9 +245,9 @@ pub struct CrewInfo {
     pub bonus_percentage_added: Skills,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub drone_id: Option<u8>,
-    pub health: u8,
+    pub health: QuantizedU8<20>,
     // base max health being 5 (sounds like reasonable enough quantization)
-    pub max_health: u8,
+    pub max_health: QuantizedU8<20>,
     // reuse on_fire for this because who cares
     #[serde(skip_serializing_if = "is_false")]
     pub fighting_fire: bool,
@@ -284,7 +341,7 @@ pub enum ShipId {
 
 #[derive(Debug, Serialize, Delta)]
 #[serde(rename_all = "camelCase")]
-struct LocationInfo {
+pub struct LocationInfo {
     pub map_position: Point<i32>,
     pub map_routes: Vec<Point<i32>>,
     /// Your current location.
@@ -434,316 +491,23 @@ impl LocationInfo {
     }
 }
 
-/*#[derive(Debug)]
-pub struct CrewContext {
-    pub name: String,
+#[derive(Debug, Serialize, Delta)]
+#[serde(rename_all = "camelCase")]
+pub struct SectorInfo {
+    pub map_position: Point<i32>,
+    pub map_routes: Vec<Point<i32>>,
+    // only add this if this is immediately reachable
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "is_false")]
+    pub hostile: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub civilian: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub nebula: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub unknown: bool,
 }
 
-#[derive(Debug)]
-pub struct ShipBuilderContext {
-    pub ship_name: String,
-    pub crew_members: Vec<CrewContext>,
-    pub advanced_edition: bool,
-    pub difficulty: Difficulty,
-}
-
-#[derive(Debug)]
-pub struct PowerEffect {
-    pub required_power: usize,
-    pub currently_active: bool,
-    pub purchased: bool,
-    pub scrap_cost: usize,
-    pub effect: &'static str,
-}
-
-#[derive(Debug)]
-pub enum SystemSpecificContext {
-    Shields {},
-    Engine {},
-    Oxygen {},
-    Weapons {},
-    Drones {},
-    Medbay {},
-    Pilot {},
-    Sensors {},
-    Doors {},
-    Teleporter {},
-    Cloaking {},
-    Artillery {},
-    Battery {},
-    Clonebay {},
-    Mind {},
-    Hacking {},
-    Reactor {},
-    Room {},
-}
-
-pub struct SystemContext {
-    id: &'static str,
-    // #[serde(flatten)]
-    inner: SystemSpecificContext,
-    // true if bNeedsManned or system id == 6
-    requires_manning: bool,
-    // iActiveManned
-    manned: bool,
-    needs_power: bool,
-    allocated_power: i32,
-    current_level: i32,
-    max_level: i32,
-}
-
-impl SystemSpecificContext {
-    pub fn shields(allocated_power: i32, max_power: i32) -> Self {
-        Self::Shields {
-            id: "shields",
-            allocated_power,
-            max_power,
-            max_power_with_upgrades: 8,
-        }
-    }
-    pub fn engine() -> Self {
-        Self::Engine { id: "engine" }
-    }
-    pub fn oxygen() -> Self {
-        Self::Oxygen { id: "oxygen" }
-    }
-    pub fn weapons() -> Self {
-        Self::Weapons { id: "weapons" }
-    }
-    pub fn drones() -> Self {
-        Self::Drones { id: "drones" }
-    }
-    pub fn medbay() -> Self {
-        Self::Medbay { id: "medbay" }
-    }
-    pub fn pilot() -> Self {
-        Self::Pilot { id: "pilot" }
-    }
-    pub fn sensors() -> Self {
-        Self::Sensors { id: "sensors" }
-    }
-    pub fn doors() -> Self {
-        Self::Doors { id: "doors" }
-    }
-    pub fn teleporter() -> Self {
-        Self::Teleporter { id: "teleporter" }
-    }
-    pub fn cloaking() -> Self {
-        Self::Cloaking { id: "cloaking" }
-    }
-    pub fn artillery() -> Self {
-        Self::Artillery { id: "artillery" }
-    }
-    pub fn battery() -> Self {
-        Self::Battery { id: "battery" }
-    }
-    pub fn clonebay() -> Self {
-        Self::Clonebay { id: "clonebay" }
-    }
-    pub fn mind() -> Self {
-        Self::Mind { id: "mind" }
-    }
-    pub fn hacking() -> Self {
-        Self::Hacking { id: "hacking" }
-    }
-    pub fn reactor() -> Self {
-        Self::Reactor { id: "reactor" }
-    }
-    pub fn room() -> Self {
-        Self::Room { id: "room" }
-    }
-}
-
-#[derive(Debug)]
-pub struct GameContext {
-    pub ship_name: String,
-    pub crew_members: Vec<CrewContext>,
-    pub systems: Vec<SystemSpecificContext>,
-}
-
-#[derive(Debug)]
-pub enum Context {
-    MainMenu,
-    ShipBuilder(ShipBuilderContext),
-}*/
-
-pub trait Delta<'a> {
-    type Delta: std::fmt::Debug + Serialize;
-    fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta>;
-}
-
-#[derive(Clone, Debug, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[serde(rename_all = "snake_case")]
-pub enum Operations<A, B> {
-    Reset,
-    Added(A),
-    Removed(A),
-    Changed(B),
-}
-
-impl<'a, T: Clone + std::fmt::Debug + Delta<'a> + HasId<'a> + Serialize> Delta<'a> for Vec<T> {
-    type Delta = Vec<Operations<T, T::Delta>>;
-    fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
-        let mut ret = vec![];
-        if self.len() == prev.len() {
-            let mut this: Vec<_> = self.iter().collect();
-            let mut that: Vec<_> = prev.iter().collect();
-            this.sort_by_key(|x| x.id());
-            that.sort_by_key(|x| x.id());
-            for x in this.windows(2) {
-                if x[0].id() == x[1].id() {
-                    #[cfg(debug_assertions)]
-                    panic!("duplicate id {ret:?}");
-                    #[cfg(not(debug_assertions))]
-                    log::error!("duplicate id {ret:?}");
-                }
-            }
-            let mut this = this.into_iter().peekable();
-            let mut that = that.into_iter().peekable();
-            loop {
-                match (this.peek(), that.peek()) {
-                    (None, None) => break,
-                    (None, Some(_)) => {
-                        ret.push(Operations::Removed(that.next().unwrap().clone()));
-                    }
-                    (Some(_), None) => {
-                        ret.push(Operations::Added(this.next().unwrap().clone()));
-                    }
-                    (Some(x), Some(y)) => match x.id().cmp(&y.id()) {
-                        Ordering::Less => ret.push(Operations::Added(this.next().unwrap().clone())),
-                        Ordering::Greater => {
-                            ret.push(Operations::Removed(that.next().unwrap().clone()))
-                        }
-                        Ordering::Equal => {
-                            if let Some(delta) = this.next().unwrap().delta(that.next().unwrap()) {
-                                ret.push(Operations::Changed(delta))
-                            }
-                        }
-                    },
-                }
-            }
-            (!ret.is_empty()).then_some(ret)
-        } else {
-            ret.push(Operations::Reset);
-            ret.extend(self.iter().cloned().map(Operations::Added));
-            Some(ret)
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct Help<T> {
-    pub value: T,
-    pub help: Cow<'static, str>,
-}
-
-impl<T> Help<T> {
-    pub fn new(help: impl Into<Cow<'static, str>>, value: T) -> Self {
-        Self {
-            value,
-            help: help.into(),
-        }
-    }
-    pub fn set(&mut self, val: T) {
-        assert_ne!(self.help.as_ref(), strings::BUG);
-        self.value = val;
-    }
-}
-
-impl Help<u8> {
-    pub fn is_zero(&self) -> bool {
-        self.value == 0
-    }
-}
-
-impl Help<bool> {
-    pub fn is_false(&self) -> bool {
-        !self.value
-    }
-}
-
-pub fn is_false(x: &bool) -> bool {
-    !*x
-}
-
-pub fn is_zero_u8(x: &u8) -> bool {
-    *x == 0
-}
-
-impl<T> Help<Option<T>> {
-    pub fn is_none(&self) -> bool {
-        self.value.is_none()
-    }
-}
-
-impl<'a, T: Serialize> Delta<'a> for Help<T>
-where
-    T: Delta<'a>,
-{
-    type Delta = <T as Delta<'a>>::Delta;
-    fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
-        self.value.delta(&prev.value)
-    }
-}
-
-macro_rules! impl_delta {
-    ($($t:ty),*) => {
-        $(impl<'a> Delta<'a> for $t {
-            type Delta = &'a Self;
-            fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
-                (self != prev).then_some(self)
-            }
-        })*
-    };
-}
-
-macro_rules! impl_delta1 {
-    ($($t:tt),*) => {
-        $(impl<'a, T: 'a + std::fmt::Debug + Serialize + Eq> Delta<'a> for $t <T> {
-            type Delta = &'a Self;
-            fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
-                (self != prev).then_some(self)
-            }
-        })*
-    };
-}
-
-impl_delta!(u8, i8, u16, i16, u32, i32, u64, i64, usize, isize);
-impl_delta!((), bool, String, ShipId, Species);
-impl_delta1!(Option, Point);
-
-impl<'a, 'b: 'a, T: 'a + ToOwned + std::fmt::Debug + Serialize + Eq + ?Sized> Delta<'a>
-    for Cow<'b, T>
-where
-    <Cow<'a, T> as ToOwned>::Owned: std::fmt::Debug,
-{
-    type Delta = Cow<'a, T>;
-    fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
-        (self != prev).then(|| Cow::Borrowed(self.as_ref()))
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::Delta;
-
-    #[derive(Debug, Delta)]
-    struct Test {
-        a: i32,
-        b: i32,
-        c: i32,
-    }
-
-    #[test]
-    fn test() {
-        let a = Test { a: 0, b: 0, c: 1 };
-        let b = Test { a: 1, b: 0, c: 0 };
-        let x = b.delta(&a);
-        assert_eq!(
-            serde_json::to_string(&x).unwrap().as_str(),
-            r#"{"a":1,"c":0}"#
-        );
-        let x = b.delta(&b);
-        assert_eq!(serde_json::to_string(&x).unwrap().as_str(), r#"null"#)
-    }
-}
+impl_delta!(ShipId, Species);
+impl_delta1!(Point);
