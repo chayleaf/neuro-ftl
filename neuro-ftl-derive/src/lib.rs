@@ -202,3 +202,139 @@ fn derive_json_schema_no_ref2(input: TokenStream) -> TokenStream {
 pub fn derive_json_schema_no_ref(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     derive_json_schema_no_ref2(input.into()).into()
 }
+
+fn derive_delta2(input: TokenStream) -> TokenStream {
+    let input: DeriveInput = syn::parse2(input).unwrap();
+    let DeriveInput {
+        attrs,
+        vis,
+        ident,
+        generics,
+        data,
+    } = input;
+
+    let syn::Generics {
+        lt_token: _,
+        gt_token: _,
+        params,
+        where_clause: wher,
+    } = generics;
+    // let mut impl_gen = TokenStream::new();
+    let mut impl_gen2 = TokenStream::new();
+    let mut ty_gen = TokenStream::new();
+    let mut ty_gen2 = TokenStream::new();
+    impl_gen2.extend(quote! { 'delta, });
+    ty_gen2.extend(quote! { 'delta, });
+    for param in params {
+        match param {
+            syn::GenericParam::Type(mut p) => {
+                p.bounds
+                    .push(syn::TypeParamBound::Lifetime(syn::Lifetime::new(
+                        "'delta",
+                        Span::call_site(),
+                    )));
+                let name = &p.ident;
+                // impl_gen.extend(quote! { #p, });
+                impl_gen2.extend(quote! { #p, });
+                ty_gen.extend(quote! { #name, });
+                ty_gen2.extend(quote! { #name, });
+            }
+            syn::GenericParam::Const(p) => {
+                let name = &p.ident;
+                // impl_gen.extend(quote! { #p, });
+                impl_gen2.extend(quote! { #p, });
+                ty_gen.extend(quote! { #name, });
+                ty_gen2.extend(quote! { #name, });
+            }
+            syn::GenericParam::Lifetime(p) => {
+                ty_gen.extend(quote! { #p, });
+                ty_gen2.extend(quote! { #p, });
+                // impl_gen.extend(quote! { #p, });
+                impl_gen2.extend(quote! { #p, });
+            }
+        }
+    }
+    let ty_gen = if ty_gen.is_empty() {
+        ty_gen
+    } else {
+        quote! { <#ty_gen> }
+    };
+
+    let syn::Data::Struct(data) = data else {
+        panic!("must be struct")
+    };
+
+    let syn::Fields::Named(fields1) = data.fields else {
+        panic!("fields must be named")
+    };
+    let attr = attrs
+        .iter()
+        .find(|x| x.path().to_token_stream().to_string().as_str() == "serde")
+        .cloned();
+
+    let mut fields = TokenStream::new();
+    let mut body1 = TokenStream::new();
+    let mut body2 = TokenStream::new();
+    for field in fields1.named {
+        let syn::Field {
+            attrs,
+            vis,
+            mutability: _,
+            ident,
+            colon_token: _,
+            ty,
+        } = field;
+        let mut attr = attrs
+            .iter()
+            .find(|x| x.path().to_token_stream().to_string().as_str() == "delta")
+            .cloned();
+        let path = match attr.as_mut().map(|x| &mut x.meta) {
+            None => None,
+            Some(syn::Meta::Path(p)) => Some(p),
+            Some(syn::Meta::List(x)) => Some(&mut x.path),
+            Some(syn::Meta::NameValue(x)) => Some(&mut x.path),
+        };
+        if let Some(path) = path {
+            path.segments.first_mut().unwrap().ident = Ident::new("serde", Span::call_site());
+        }
+        fields.extend(quote! {
+            #attr
+            #[serde(skip_serializing_if = "Option::is_none")]
+            #vis #ident: Option<<#ty as Delta<'delta>>::Delta>,
+        });
+        body1.extend(quote! {
+            let #ident = self.#ident.delta(&prev.#ident);
+            changed = changed || #ident.is_some();
+        });
+        body2.extend(quote! {
+            #ident,
+        });
+    }
+
+    let name_delta = syn::Ident::new(&(ident.to_string() + "Delta"), Span::call_site());
+    quote! {
+        #[derive(Clone, Debug, serde::Serialize)]
+        #attr
+        #vis struct #name_delta <#impl_gen2> {
+            #fields
+        }
+        impl <#impl_gen2> Delta<'delta> for #ident #ty_gen #wher {
+            type Delta = #name_delta <#ty_gen2>;
+            fn delta(&'delta self, prev: &'delta Self) -> Option<Self::Delta> {
+                let mut changed = false;
+                #body1
+                if !changed {
+                    return None;
+                }
+                Some(Self::Delta {
+                    #body2
+                })
+            }
+        }
+    }
+}
+
+#[proc_macro_derive(Delta, attributes(serde, delta))]
+pub fn derive_delta(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    derive_delta2(input.into()).into()
+}

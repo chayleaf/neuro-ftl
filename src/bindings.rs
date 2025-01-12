@@ -14,7 +14,10 @@ use std::{
 
 use neuro_ftl_derive::{vtable, TestOffsets};
 
-use crate::game::actions::Direction;
+use crate::game::{
+    actions::Direction,
+    strings::{self, text},
+};
 
 pub unsafe fn xb<'a, T>(x: *const T) -> Option<&'a T> {
     (!x.is_null()).then(|| &*x)
@@ -56,42 +59,42 @@ pub enum System {
 impl System {
     pub fn tooltip(&self, enemy: bool) -> &'static str {
         match (self, enemy) {
-            (Self::Oxygen, false) => "Oxygen: Replenishes the ship's oxygen supply.",
-            (Self::Oxygen, true) => "Oxygen: Replenishes the enemy ship's oxygen supply.",
-            (Self::Doors, false) => "Doors: Allows for remote opening/closing of doors.",
-            (Self::Doors, true) => "Doors: Powers enemy blast doors, delaying boarder movement.",
-            (Self::Shields, false) => "Shields: Sustains projectile-blocking shields. Manning increases shield recharge speed.",
-            (Self::Shields, true) => "Shields: Powers the enemy's projectile blocking shields.",
-            (Self::Pilot, false) => "Piloting: Requires a crewmember to evade in combat or jump.",
-            (Self::Pilot, true) => "Piloting: If functional with a crew-member, the enemy can dodge your shots.",
-            (Self::Engines, false) => "Engines: Charges the FTL drive and powers evasion. Manning increases dodge chance.",
-            (Self::Engines, true) => "Engines: Charges the enemy FTL drive and powers evasion.",
-            (Self::Sensors, false) => "Sensors: Enables view of all rooms and info for enemy ships.",
-            (Self::Sensors, true) => "Sensors: No functionality for the enemy.",
-            (Self::Medbay, false) => "Medbay: Heals crewmembers inside the Medbay",
-            (Self::Medbay, true) => "Medbay: Heals enemy crewmembers.",
-            (Self::Weapons, false) => "Weapons: Activate a weapon to charge and target it to fire. Manning reduces charge time.",
-            (Self::Weapons, true) => "Weapons: Powers the enemy's weapons. Destroy it to stop them firing.",
-            (Self::Drones, false) => "Drones: Power automated robots for attack and defense.",
-            (Self::Drones, true) => "Drones: Powers the enemy's drones. Destroy it to shut them down.",
-            (Self::Teleporter, false) => "Teleporter: Send crewmembers in the teleporter room to board enemy ships.",
-            (Self::Teleporter, true) => "Teleporter: The enemy uses this to teleport intruders onto your ship.",
-            (Self::Cloaking, false) => "Cloaking: Partially disappear into another dimension, providing +60 to dodge and temporarily stopping enemy weapon charging and aiming.",
-            (Self::Cloaking, true) => "Cloaking: When in use, your weapons cannot charge and the enemy evasion is increased by 60.",
-            (Self::Artillery, _) => "BUG IN THE MOD", // actual text is taken from weapon text
-            (Self::Reactor, false) => "Reactor: Reactor energy powers your systems.",
-            (Self::Reactor, true) => "Reactor: Reactor energy powers enemy systems.",
-            (Self::Battery, false) => "Battery: Activate to temporarily increase available reactor power.",
-            (Self::Battery, true) => "Battery: Grants temporary power to the enemy.",
-            (Self::Clonebay, false) => "Clone Bay: Automatically clones any dead crewmember.",
-            (Self::Clonebay, true) => "Clone Bay: Will automatically clone any crew you kill, reviving them to fight again!",
-            (Self::Mind, false) => "Mind Control: Turn enemies into friendlies temporarily.",
-            (Self::Mind, true) => "Mind Control: Can temporarily gain control of your crew. Destroy it to prevent this.",
-            (Self::Hacking, false) => "Hacking: Lockdown a system room while periodically disrupting the system and stunning crew.",
-            (Self::Hacking, true) => "Hacking: Launches a hacking drone that can temporarily disable a system.",
-            (Self::Total, _) => "BUG IN THE MOD",
-            (Self::Random, _) => "BUG IN THE MOD",
-            (Self::Room, _) => "BUG IN THE MOD",
+            (Self::Oxygen, false) => text("tooltip_oxygen"),
+            (Self::Oxygen, true) => text("tooltip_oxygen_enemy"),
+            (Self::Doors, false) => text("tooltip_doors"),
+            (Self::Doors, true) => text("tooltip_doors_enemy"),
+            (Self::Shields, false) => text("tooltip_shields"),
+            (Self::Shields, true) => text("tooltip_shields_enemy"),
+            (Self::Pilot, false) => text("tooltip_pilot"),
+            (Self::Pilot, true) => text("tooltip_pilot_enemy"),
+            (Self::Engines, false) => text("tooltip_engines"),
+            (Self::Engines, true) => text("tooltip_engines_enemy"),
+            (Self::Sensors, false) => text("tooltip_sensors"),
+            (Self::Sensors, true) => text("tooltip_sensors_enemy"),
+            (Self::Medbay, false) => text("tooltip_medbay"),
+            (Self::Medbay, true) => text("tooltip_medbay_enemy"),
+            (Self::Weapons, false) => strings::TOOLTIP_WEAPONS,
+            (Self::Weapons, true) => text("tooltip_weapons_touch_enemy"),
+            (Self::Drones, false) => text("tooltip_drones"),
+            (Self::Drones, true) => text("tooltip_drones_enemy"),
+            (Self::Teleporter, false) => text("tooltip_teleporter"),
+            (Self::Teleporter, true) => text("tooltip_teleporter_enemy"),
+            (Self::Cloaking, false) => text("tooltip_cloaking"),
+            (Self::Cloaking, true) => text("tooltip_cloaking_enemy"),
+            (Self::Artillery, _) => strings::BUG, // actual text is taken from weapon text
+            (Self::Reactor, false) => strings::TOOLTIP_REACTOR,
+            (Self::Reactor, true) => strings::TOOLTIP_REACTOR_ENEMY,
+            (Self::Battery, false) => text("tooltip_battery"),
+            (Self::Battery, true) => text("tooltip_battery_enemy"),
+            (Self::Clonebay, false) => text("tooltip_clonebay"),
+            (Self::Clonebay, true) => text("tooltip_clonebay_enemy"),
+            (Self::Mind, false) => text("tooltip_mind"),
+            (Self::Mind, true) => text("tooltip_mind_enemy"),
+            (Self::Hacking, false) => text("tooltip_hacking"),
+            (Self::Hacking, true) => text("tooltip_hacking_enemy"),
+            (Self::Total, _) => strings::BUG,
+            (Self::Random, _) => strings::BUG,
+            (Self::Room, _) => strings::BUG,
         }
     }
     pub fn from_id(id: c_int) -> Option<System> {

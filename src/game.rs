@@ -19,7 +19,8 @@ use tokio::sync::mpsc;
 use crate::bindings::{self, power_manager, xc, xm, CApp, Door, StoreType, System};
 
 pub mod actions;
-// mod context;
+mod context;
+pub mod strings;
 
 fn meta<T: Action>() -> neuro_sama::schema::Action {
     neuro_sama::schema::Action {
