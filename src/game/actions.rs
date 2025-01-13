@@ -190,6 +190,7 @@ pub struct PlanDoorRoute {
 #[serde(rename_all = "camelCase")]
 pub struct MoveCrew {
     pub crew_member_names: Vec<String>,
+    pub ship: TargetShip,
     pub room_id: u8,
 }
 
@@ -356,6 +357,15 @@ pub struct Wait {
     pub distress_signal: bool,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Lockdown {
+    pub ship: TargetShip,
+    pub room_id: u8,
+    #[serde(default)]
+    pub crew_member_name: String,
+}
+
 #[derive(Actions, Debug)]
 pub enum FtlActions {
     /// Skip credits
@@ -498,6 +508,11 @@ pub enum FtlActions {
     /// manning ship systems and subsystems.
     #[name = "move_crew"]
     MoveCrew(MoveCrew),
+    /// Use a Crystal crew member to lockdown a room, making all the doors nearly impossible to
+    /// break through for 12 seconds. The crew member won't be able to lockdown other rooms for 50
+    /// seconds. They can only lockdown the room they are currently in.
+    #[name = "lockdown_room"]
+    Lockdown(Lockdown),
     /// Go to the ship overview screen, where you can upgrade the ship's reactor, systems and
     /// subsystems, where you can fire and rename crew members and manage your inventory to swap
     /// drones and weapons.

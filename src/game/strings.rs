@@ -19,6 +19,10 @@ pub const SKILL_SHIELDS: &str = "Shield recharge speed bonus percentage when man
 pub const SKILL_WEAPONS: &str = "Weapons recharge speed bonus percentage when manning Weapons";
 pub const SKILL_REPAIRING: &str = "Repair speed, with 100 being the base repair speed";
 pub const SKILL_FIGHTING: &str = "Hand-to-hand combat power, with 100 being the base combat power";
+pub const SKILL_MOVEMENT: &str = "Movement speed, with 100 being the base movement speed";
+pub const SKILL_SUFFOCATION_RES: &str =
+    "Suffocation resistance, with 100 being 0 damage from suffocation";
+pub const SKILL_LOCKDOWN: &str = "Lockdown power, activate with the `lockdown` action";
 
 pub fn text(s: &str) -> &'static str {
     crate::library().text(s).unwrap()

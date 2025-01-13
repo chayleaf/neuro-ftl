@@ -31,6 +31,8 @@ impl TextString {
     pub fn to_str(&'static self) -> &'static str {
         if let Some(id) = &self.load {
             super::library().text(id).unwrap()
+        } else if let Some(id) = &self.id {
+            super::library().text(id).unwrap()
         } else {
             self.contents.as_ref().unwrap()
         }

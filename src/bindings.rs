@@ -6663,6 +6663,62 @@ pub struct CrewMember {
     pub b_cloned: bool,
 }
 
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct EnergyAlien {
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
+    pub base: CrewMember,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x741)]
+    pub b_trigger_explosion: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x742)]
+    pub b_exploded: bool,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct CrystalAlien {
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
+    pub base: CrewMember,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x744)]
+    pub power_cooldown: Pair<c_float, c_float>,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct AnaerobicAlien {
+    pub base: CrewMember,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct SlugAlien {
+    pub base: CrewMember,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct MantisAlien {
+    pub base: CrewMember,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct RockAlien {
+    pub base: CrewMember,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct EngiAlien {
+    pub base: CrewMember,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct Ghost {
+    pub base: CrewMember,
+}
+
 #[repr(usize)]
 #[derive(Copy, Clone, Debug)]
 pub enum CrewSkill {

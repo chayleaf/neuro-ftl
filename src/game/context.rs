@@ -301,6 +301,31 @@ pub struct Skills {
     pub weapons_recharge: Help<u8>,
     pub repairing_speed: Help<u8>,
     pub fighting_strength: Help<u8>,
+    pub movement_speed: Help<u8>,
+    // Rockman
+    #[serde(skip_serializing_if = "Help::is_false")]
+    pub fire_immunity: Help<bool>,
+    // Slug
+    #[serde(skip_serializing_if = "Help::is_false")]
+    pub mind_control_immunity: Help<bool>,
+    // Slug
+    #[serde(skip_serializing_if = "Help::is_false")]
+    pub telepathic_sensors: Help<bool>,
+    // Lanius/Crystal
+    #[serde(skip_serializing_if = "Help::is_zero")]
+    pub suffocation_resistance: Help<u8>,
+    // Lanius
+    #[serde(skip_serializing_if = "Help::is_false")]
+    pub drains_room_oxygen: Help<bool>,
+    // Crystal
+    #[serde(skip_serializing_if = "Help::is_false")]
+    pub can_lockdown_rooms: Help<bool>,
+    // Zoltan
+    #[serde(skip_serializing_if = "Help::is_zero")]
+    pub damage_on_death: Help<u8>,
+    // Zoltan
+    #[serde(skip_serializing_if = "Help::is_false")]
+    pub powers_systems: Help<bool>,
 }
 
 impl Skills {
@@ -312,6 +337,15 @@ impl Skills {
             weapons_recharge: Help::new(strings::SKILL_WEAPONS, 0),
             repairing_speed: Help::new(strings::SKILL_REPAIRING, 0),
             fighting_strength: Help::new(strings::SKILL_FIGHTING, 0),
+            movement_speed: Help::new(strings::SKILL_MOVEMENT, 0),
+            fire_immunity: Help::new(text("crew_rock_power_1"), false),
+            mind_control_immunity: Help::new(text("crew_slug_power_2"), false),
+            telepathic_sensors: Help::new(text("crew_slug_power_1"), false),
+            suffocation_resistance: Help::new(strings::SKILL_SUFFOCATION_RES, 0),
+            drains_room_oxygen: Help::new(text("crew_anaerobic_power_1"), false),
+            can_lockdown_rooms: Help::new(strings::SKILL_LOCKDOWN, false),
+            damage_on_death: Help::new(text("crew_energy_power_3"), 0),
+            powers_systems: Help::new(text("crew_energy_power_1"), false),
         }
     }
 }
@@ -325,7 +359,7 @@ pub struct CrewInfo {
     pub faction: ShipId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<Location>,
-    pub bonus_percentage_added: Skills,
+    pub bonuses: Skills,
     pub health: QuantizedU8<20>,
     pub max_health: QuantizedU8<20>,
     // reuse on_fire for this because who cares

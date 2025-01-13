@@ -534,13 +534,10 @@ impl neuro_sama::game::GameMut for State {
                                     .into())
                                     }
                                 } else {
-                                    Err(Cow::from("can't rename the crew member").into())
+                                    Err(Cow::from("can't rename this crew member").into())
                                 }
                             } else {
-                                Err(Cow::from(
-                                    "crew member box not found, this is probably a bug in the mod",
-                                )
-                                .into())
+                                Err(Cow::from("can't rename this crew member").into())
                             }
                         } else {
                             let names = IdMap::with(|map| {
@@ -578,8 +575,8 @@ impl neuro_sama::game::GameMut for State {
                         let b = unsafe { xm(*b).unwrap() };
                         b.customize_button.base.b_hover = false;
                     }
-                    // force disable advanced edition to make my life easier
-                    if b.advanced_off_button.base.b_active {
+                    // force enable advanced edition
+                    /*if b.advanced_on_button.base.b_active {
                         b.start_button.base.b_hover = false;
                         b.hard_button.base.b_hover = false;
                         b.easy_button.base.b_hover = false;
@@ -592,14 +589,15 @@ impl neuro_sama::game::GameMut for State {
                         b.type_a.base.b_hover = false;
                         b.type_b.base.b_hover = false;
                         b.type_c.base.b_hover = false;
-                        b.advanced_off_button.base.b_hover = true;
+                        b.advanced_off_button.base.b_hover = false;
+                        b.advanced_on_button.base.b_hover = true;
                         unsafe {
                             app.base
                                 .vtable()
                                 .on_l_button_down(ptr::addr_of_mut!(app.base), 0, 0);
                         }
-                    }
-                    // force enable easy mode to make neuro's life easier
+                    }*/
+                    // force enable easy mode
                     if b.easy_button.base.b_active {
                         b.start_button.base.b_hover = false;
                         b.hard_button.base.b_hover = false;
@@ -619,7 +617,7 @@ impl neuro_sama::game::GameMut for State {
                         }
                         Ok(Cow::from("successfully started the game").into())
                     } else {
-                        Err(Cow::from("couldn't start the game, the game broke").into())
+                        Err(Cow::from("couldn't start the game, this is a bug in the mod").into())
                     }
                 } else {
                     Err(Cow::from("can't start the game at this time").into())
@@ -699,7 +697,7 @@ impl neuro_sama::game::GameMut for State {
                             .into())
                         }
                     } else {
-                        Err(Cow::from("index out of range").into())
+                        Err(Cow::from("invalid choice").into())
                     }
                 } else {
                     Err(Cow::from("can't choose an event option at the time").into())
@@ -820,16 +818,14 @@ impl neuro_sama::game::GameMut for State {
                         .into())
                     }
                 } else if increase {
-                    Err(Cow::from("can't increase a system's power at the time").into())
+                    Err(Cow::from("can't increase systems' power at the time").into())
                 } else {
-                    Err(Cow::from("can't decrease a system's power at the time").into())
+                    Err(Cow::from("can't decrease systems' power at the time").into())
                 }
             }
             FtlActions::SetWeaponTargets(event) => {
                 if !self.actions.valid(&event) {
-                    Err(Cow::from("can't target a weapon at the time").into())
-                } else if event.target_room_ids.is_empty() {
-                    Err(Cow::from("must choose at least a single target").into())
+                    Err(Cow::from("can't target weapons at the time").into())
                 } else {
                     let gui = app.gui().unwrap();
                     let ship_manager = gui.ship_manager().unwrap();
@@ -858,12 +854,18 @@ impl neuro_sama::game::GameMut for State {
                             && gui.combat_control.current_target.is_null()
                         {
                             Err(Cow::from("can't target the enemy because there's no enemy").into())
+                        } else if weapon.num_targets_required() == 0 {
+                            Err(
+                                Cow::from("this weapon currently doesn't accept any targets")
+                                    .into(),
+                            )
                         } else if (weapon.num_targets_required() as usize)
                             != event.target_room_ids.len()
                         {
                             Err(Cow::from(format!(
-                                "this weapon currently requires {} targets",
-                                weapon.num_targets_required()
+                                "this weapon currently requires {} targets, not {}",
+                                weapon.num_targets_required(),
+                                event.target_room_ids.len()
                             ))
                             .into())
                         } else if !weapon.powered {
@@ -1009,9 +1011,9 @@ impl neuro_sama::game::GameMut for State {
                                     Err(Cow::from("the drone can't currently be deployed, probably because there's no enemy ship").into())
                                 } else if drone.destroyed_timer > 0.0 {
                                     Err(Cow::from(
-                                "the drone is still rebuilding and can't be deployed at the moment",
-                            )
-                            .into())
+                                        "the drone is still rebuilding and can't be deployed at the moment",
+                                    )
+                                    .into())
                                 } else if drone_system.base.available_power()
                                     < drone.required_power()
                                 {
@@ -1139,23 +1141,23 @@ impl neuro_sama::game::GameMut for State {
                                         < weapon.required_power - weapon.i_bonus_power
                                     {
                                         Err(Cow::from(
-                                    format!("the weapon system is currently at {}/{} power usage, while the weapon requires {} power, you could try upgrading the system to increase max power", weapon_system.base.effective_power(), weapon_system.base.max_power(), weapon.required_power - weapon.i_bonus_power),
-                                )
-                                .into())
+                                            format!("the weapon system is currently at {}/{} power usage, while the weapon requires {} power, you could try upgrading the system to increase max power", weapon_system.base.effective_power(), weapon_system.base.max_power(), weapon.required_power - weapon.i_bonus_power),
+                                        )
+                                        .into())
                                     } else if weapon_system.base.power_state.second
                                         - weapon_system.base.power_state.first
                                         >= weapon.required_power
                                         && weapon_system.base.damage() > 0
                                     {
                                         Err(Cow::from(
-                                    format!("the weapon system is currently at {}/{} power usage, while the weapon requires {} power, you could try repairing the system to increase max power", weapon_system.base.effective_power(), weapon_system.base.max_power(), weapon.required_power - weapon.i_bonus_power),
-                                )
-                                .into())
+                                            format!("the weapon system is currently at {}/{} power usage, while the weapon requires {} power, you could try repairing the system to increase max power", weapon_system.base.effective_power(), weapon_system.base.max_power(), weapon.required_power - weapon.i_bonus_power),
+                                        )
+                                        .into())
                                     } else {
                                         Err(Cow::from(
-                                    format!("the weapon system is currently at {}/{} power usage, while the weapon requires {} power, you could try powering down other weapons", weapon_system.base.effective_power(), weapon_system.base.max_power(), weapon.required_power - weapon.i_bonus_power),
-                                )
-                                .into())
+                                            format!("the weapon system is currently at {}/{} power usage, while the weapon requires {} power, you could try powering down other weapons", weapon_system.base.effective_power(), weapon_system.base.max_power(), weapon.required_power - weapon.i_bonus_power),
+                                        )
+                                        .into())
                                     }
                                 } else if unsafe {
                                     ship_manager.power_weapon(b.p_weapon, true, false)
@@ -1322,6 +1324,10 @@ impl neuro_sama::game::GameMut for State {
                                 .unwrap(),
                         )
                         .into())
+                    } else if event.target_ship == TargetShip::Enemy
+                        && gui.combat_control.current_target.is_null()
+                    {
+                        Err(Cow::from("there's no enemy ship at the moment").into())
                     } else if !gui
                         .ship_manager_mut()
                         .unwrap()
@@ -1771,6 +1777,7 @@ impl neuro_sama::game::GameMut for State {
                 } else {
                     let actions::MoveCrew {
                         mut crew_member_names,
+                        ship,
                         room_id,
                     } = event;
                     let gui = app.gui().unwrap();
@@ -1829,10 +1836,12 @@ impl neuro_sama::game::GameMut for State {
                             })
                             .collect::<Result<Vec<_>, _>>()
                     }) {
+                        Ok(crew) if crew.is_empty() => Err(Some(Cow::from(
+                            "must specify at least 1 crew member to move",
+                        ))),
                         Ok(crew) => {
                             let mut err = None;
                             let mut crew1 = Vec::new();
-                            let mut target_ship = None::<TargetShip>;
                             let mut ignore = Vec::new();
                             for (i, c0) in &crew {
                                 let c = unsafe { xc(*c0).unwrap() };
@@ -1851,30 +1860,41 @@ impl neuro_sama::game::GameMut for State {
                                     ))));
                                     break;
                                 }
+                                if c.b_mind_controlled {
+                                    err = Some(Some(Cow::from(format!(
+                                        "the crew member {i:?} is currently mind controlled so he won't listen to your orders"
+                                    ))));
+                                    break;
+                                }
+                                if !unsafe { c.vtable().get_controllable(*c0) } {
+                                    err = Some(Some(Cow::from(format!(
+                                        "the crew member {i:?} is a drone and can't be controlled"
+                                    ))));
+                                    break;
+                                }
                                 if c.current_slot.room_id == i32::from(room_id) {
                                     ignore.push(i.to_string());
                                     continue;
                                 }
-                                let ship = if c.i_ship_id == c.current_ship_id {
+                                let ship1 = if c.i_ship_id == c.current_ship_id {
                                     TargetShip::Player
                                 } else {
                                     TargetShip::Enemy
                                 };
-                                if target_ship.is_some_and(|x| x != ship) {
-                                    err = Some(Some(Cow::from(
-                                        "the crew members are all on the same ship",
-                                    )));
+                                if ship1 != ship {
+                                    err = Some(Some(Cow::from(format!(
+                                        "crew member {i:?} is on a different ship"
+                                    ))));
                                     break;
                                 }
-                                target_ship = Some(ship);
                                 crew1.push((i, *c0));
                             }
-                            let (target_ship, s) = match target_ship {
-                                Some(TargetShip::Enemy) => (
+                            let (target_ship, s) = match ship {
+                                TargetShip::Enemy => (
                                     gui.combat_control.current_target().unwrap().ship_manager(),
                                     "enemy",
                                 ),
-                                _ => (gui.ship_manager(), "player"),
+                                TargetShip::Player => (gui.ship_manager(), "player"),
                             };
                             if let Some(err) = err {
                                 Err(err)
@@ -1939,6 +1959,83 @@ impl neuro_sama::game::GameMut for State {
                             }
                         }
                         Err(err) => Err(err),
+                    }
+                }
+            }
+            FtlActions::Lockdown(event) => {
+                if !self.actions.valid(&event) {
+                    Err(Cow::from("can't lockdown rooms at the time").into())
+                } else {
+                    let actions::Lockdown {
+                        crew_member_name: name,
+                        ship,
+                        room_id,
+                    } = event;
+                    let gui = app.gui().unwrap();
+                    let crew = &gui.ship_manager().unwrap().v_crew_list;
+                    let crew = IdMap::with(|map| {
+                        crew.iter().copied().find(|c| {
+                            map.map(unsafe { xc(*c).unwrap() }.blueprint.crew_name_long.to_str())
+                                == name
+                        })
+                    });
+                    match crew {
+                        Some(c0) => {
+                            let c = unsafe { xc(c0).unwrap() };
+                            if c.b_dead {
+                                Err(Some(Cow::from(format!(
+                                    "the crew member {name:?} is currently dead"
+                                ))))
+                            } else if !unsafe { c.vtable().has_special_power(c0) } {
+                                Err(Some(Cow::from(format!(
+                                    "the crew member {name:?} is not a crystal and can't lockdown rooms"
+                                ))))
+                            } else if !unsafe { c.vtable().power_ready(c0) } {
+                                Err(Some(Cow::from(format!(
+                                    "the crew member {name:?}'s power is currently on a cooldown"
+                                ))))
+                            } else if (if c.i_ship_id == c.current_ship_id {
+                                TargetShip::Player
+                            } else {
+                                TargetShip::Enemy
+                            }) != ship
+                            {
+                                Err(Some(Cow::from(format!(
+                                    "crew member {name:?} is on a different ship"
+                                ))))
+                            } else if c.current_slot.room_id != i32::from(room_id) {
+                                Err(Some(Cow::from(format!(
+                                    "crew member {name:?} is in a different room"
+                                ))))
+                            } else {
+                                unsafe { c.vtable().activate_power(c0) }
+                                Ok(Cow::from("successfully locked the room down").into())
+                            }
+                        }
+                        None => {
+                            let names = IdMap::with(|map| {
+                                app.gui()
+                                    .unwrap()
+                                    .ship_manager()
+                                    .unwrap()
+                                    .v_crew_list
+                                    .iter()
+                                    .map(|x| {
+                                        map.map(
+                                            unsafe { xc(*x).unwrap() }
+                                                .blueprint
+                                                .crew_name_long
+                                                .to_str(),
+                                        )
+                                    })
+                                    .collect::<Vec<_>>()
+                            });
+                            Err(Some(Cow::from(format!(
+                                "crew member {:?} doesn't exist, current crew members: {}",
+                                name,
+                                serde_json::to_string(&names).unwrap()
+                            ))))
+                        }
                     }
                 }
             }
@@ -2976,6 +3073,16 @@ impl ActionDb {
     }
 }
 
+/*fn prop_opt(
+    schema: &mut schemars::Schema,
+    name: impl AsRef<str>,
+) -> Option<&mut serde_json::Value> {
+    schema
+        .as_object_mut()?
+        .get_mut("properties")?
+        .get_mut(name.as_ref())
+}*/
+
 fn prop(schema: &mut schemars::Schema, name: impl AsRef<str>) -> &mut serde_json::Value {
     schema
         .as_object_mut()
@@ -2986,7 +3093,11 @@ fn prop(schema: &mut schemars::Schema, name: impl AsRef<str>) -> &mut serde_json
         .unwrap()
 }
 
-/*fn set_range<T: Copy + Into<serde_json::Number>>(
+fn array_item(schema: &mut serde_json::Value) -> &mut serde_json::Value {
+    schema.as_object_mut().unwrap().get_mut("items").unwrap()
+}
+
+fn set_range<T: Copy + Into<serde_json::Number>>(
     schema: &mut serde_json::Value,
     range: std::ops::RangeInclusive<T>,
 ) {
@@ -3000,7 +3111,7 @@ fn prop(schema: &mut schemars::Schema, name: impl AsRef<str>) -> &mut serde_json
         .as_object_mut()
         .unwrap()
         .insert("maximum".to_owned(), max.into());
-}*/
+}
 
 fn set_enum(schema: &mut serde_json::Value, keep: impl FnMut(&mut serde_json::Value) -> bool) {
     schema
@@ -3018,6 +3129,16 @@ fn add_enum(schema: &mut serde_json::Value, vals: Vec<serde_json::Value>) {
         .as_object_mut()
         .unwrap()
         .insert("enum".to_owned(), serde_json::Value::Array(vals));
+}
+
+fn iter_range<T: Copy + Ord>(it: impl Iterator<Item = T>) -> Option<std::ops::RangeInclusive<T>> {
+    it.fold(None, |old, elem| {
+        if let Some(old) = old {
+            Some(std::cmp::min(*old.start(), elem)..=std::cmp::max(*old.end(), elem))
+        } else {
+            Some(elem..=elem)
+        }
+    })
 }
 
 fn available_actions(app: &CApp) -> ActionDb {
@@ -3530,6 +3651,22 @@ fn available_actions(app: &CApp) -> ActionDb {
             ),
         ] {
             add_enum(prop(&mut meta.schema, "weaponName"), weapons.clone());
+            /*if let Some(p) = prop_opt(&mut meta.schema, "targetRoomIds") {
+                let Some(target) = gui.combat_control.current_target() else {
+                    continue;
+                };
+                if let Some(range) = iter_range(
+                    target
+                        .ship_manager()
+                        .unwrap()
+                        .ship
+                        .v_room_list
+                        .iter()
+                        .map(|room| unsafe { xc(*room).unwrap() }.i_room_id),
+                ) {
+                    set_range(array_item(p), range);
+                }
+            }*/
             ret.actions.insert(name, meta);
         }
     }
@@ -3614,18 +3751,72 @@ fn available_actions(app: &CApp) -> ActionDb {
     }
     if let Some(sys) = gui.ship_manager().unwrap().teleport_system() {
         if sys.base.i_lock_count == 0 {
-            ret.add::<actions::TeleportSend>();
-            ret.add::<actions::TeleportReturn>();
+            if let Some(target) = gui.combat_control.current_target() {
+                if let Some(range) = iter_range(
+                    target
+                        .ship_manager()
+                        .unwrap()
+                        .ship
+                        .v_room_list
+                        .iter()
+                        .map(|room| unsafe { xc(*room).unwrap() }.i_room_id),
+                ) {
+                    let mut m = meta::<actions::TeleportSend>();
+                    set_range(prop(&mut m.schema, "targetRoomId"), range.clone());
+                    ret.actions.insert(actions::TeleportSend::name(), m);
+                    let mut m = meta::<actions::TeleportReturn>();
+                    set_range(prop(&mut m.schema, "sourceRoomId"), range);
+                    ret.actions.insert(actions::TeleportReturn::name(), m);
+                }
+            }
         }
     }
     if let Some(sys) = gui.ship_manager().unwrap().system(System::Doors) {
         if sys.i_lock_count == 0 {
-            ret.add::<actions::OpenDoors>();
-            ret.add::<actions::CloseDoors>();
-            ret.add::<actions::PlanDoorRoute>();
+            if let Some(range) = iter_range(
+                gui.ship_manager()
+                    .unwrap()
+                    .ship
+                    .v_door_list
+                    .iter()
+                    .copied()
+                    .map(|door| unsafe { xc(door).unwrap() }.i_door_id)
+                    .chain(
+                        gui.ship_manager()
+                            .unwrap()
+                            .ship
+                            .v_outer_airlocks
+                            .iter()
+                            .copied()
+                            .enumerate()
+                            .map(|(i, _)| -(i as c_int + 1)),
+                    ),
+            ) {
+                let mut m = meta::<actions::CloseDoors>();
+                set_range(array_item(prop(&mut m.schema, "doorIds")), 0..=*range.end());
+                ret.actions.insert(actions::CloseDoors::name(), m);
+                let mut m = meta::<actions::OpenDoors>();
+                set_range(array_item(prop(&mut m.schema, "doorIds")), range);
+                ret.actions.insert(actions::OpenDoors::name(), m);
+            }
+            if let Some(range) = iter_range(
+                gui.ship_manager()
+                    .unwrap()
+                    .ship
+                    .v_room_list
+                    .iter()
+                    .map(|room| unsafe { xc(*room).unwrap() }.i_room_id),
+            ) {
+                let mut m = meta::<actions::PlanDoorRoute>();
+                set_range(
+                    array_item(prop(&mut m.schema, "firstRoomId")),
+                    range.clone(),
+                );
+                set_range(array_item(prop(&mut m.schema, "secondRoomId")), range);
+                ret.actions.insert(actions::PlanDoorRoute::name(), m);
+            }
         }
     }
-    let mut meta = meta::<actions::MoveCrew>();
     let names = IdMap::with(|map| {
         app.gui()
             .unwrap()
@@ -3633,6 +3824,7 @@ fn available_actions(app: &CApp) -> ActionDb {
             .unwrap()
             .v_crew_list
             .iter()
+            .filter(|x| unsafe { xc(**x).unwrap().vtable().get_controllable(**x) })
             .map(|x| {
                 serde_json::Value::String(
                     map.map(unsafe { xc(*x).unwrap() }.blueprint.crew_name_long.to_str())
@@ -3641,15 +3833,28 @@ fn available_actions(app: &CApp) -> ActionDb {
             })
             .collect::<Vec<_>>()
     });
-    add_enum(
-        prop(&mut meta.schema, "crewMemberNames")
-            .as_object_mut()
+    let mut m = meta::<actions::MoveCrew>();
+    add_enum(array_item(prop(&mut m.schema, "crewMemberNames")), names);
+    ret.actions.insert(actions::MoveCrew::name(), m);
+    let names1 = IdMap::with(|map| {
+        app.gui()
             .unwrap()
-            .get_mut("items")
-            .unwrap(),
-        names,
-    );
-    ret.actions.insert(actions::MoveCrew::name(), meta);
+            .ship_manager()
+            .unwrap()
+            .v_crew_list
+            .iter()
+            .filter(|x| unsafe { xc(**x).unwrap().vtable().has_special_power(**x) })
+            .map(|x| {
+                serde_json::Value::String(
+                    map.map(unsafe { xc(*x).unwrap() }.blueprint.crew_name_long.to_str())
+                        .into_owned(),
+                )
+            })
+            .collect::<Vec<_>>()
+    });
+    let mut m = meta::<actions::Lockdown>();
+    add_enum(array_item(prop(&mut m.schema, "crewMemberName")), names1);
+    ret.actions.insert(actions::Lockdown::name(), m);
     // gui.sys_control.sys_boxes - iterate to get all the systems
     // 14 MindBox
     // 13 CloneBox
