@@ -206,12 +206,12 @@ pub struct Back;
 #[derive(Debug, Deserialize, JsonSchemaNoRef)]
 #[serde(rename_all = "snake_case")]
 pub enum InventorySlotType {
-    OverCapacity,
-    AugmentationOverCapacity,
     Weapon,
-    Cargo,
     Drone,
+    Cargo,
+    OverCapacity,
     Augmentation,
+    AugmentationOverCapacity,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

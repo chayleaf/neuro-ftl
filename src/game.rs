@@ -2265,7 +2265,7 @@ impl neuro_sama::game::GameMut for State {
                     let system = event.system;
                     let gui = app.gui_mut().unwrap();
                     let upgrades = &mut gui.upgrade_screen;
-                    if system.as_str() == "reactor" {
+                    if system.as_str() == "Reactor" {
                         let cost = upgrades.reactor_button.reactor_cost();
                         let scrap = upgrades.ship_manager().unwrap().current_scrap;
                         if cost > scrap {
@@ -2293,12 +2293,9 @@ impl neuro_sama::game::GameMut for State {
                     } else {
                         let c = IdMap::with(|map| {
                             upgrades.v_upgrade_boxes.iter().copied().find(|x| {
-                                unsafe { xc(*x).unwrap() }.system().is_some_and(|x| {
-                                    System::from_id(x.i_system_type).is_some_and(|x| {
-                                        map.map(x.blueprint().unwrap().title.to_str().into())
-                                            == system
-                                    })
-                                })
+                                unsafe { xc(*x).unwrap() }
+                                    .blueprint()
+                                    .is_some_and(|x| map.map(x.desc.title.to_str()) == system)
                             })
                         });
                         if let Some(c) = c {
@@ -2352,7 +2349,7 @@ impl neuro_sama::game::GameMut for State {
                                         continue;
                                     };
                                     systems.push(serde_json::Value::String(
-                                        map.map(bp.name.to_str()).into_owned(),
+                                        map.map(bp.desc.title.to_str()).into_owned(),
                                     ));
                                 }
                             });
@@ -3093,6 +3090,16 @@ fn prop(schema: &mut schemars::Schema, name: impl AsRef<str>) -> &mut serde_json
         .unwrap()
 }
 
+fn prop1(schema: &mut serde_json::Value, name: impl AsRef<str>) -> &mut serde_json::Value {
+    schema
+        .as_object_mut()
+        .unwrap()
+        .get_mut("properties")
+        .unwrap()
+        .get_mut(name.as_ref())
+        .unwrap()
+}
+
 fn array_item(schema: &mut serde_json::Value) -> &mut serde_json::Value {
     schema.as_object_mut().unwrap().get_mut("items").unwrap()
 }
@@ -3325,6 +3332,59 @@ fn available_actions(app: &CApp) -> ActionDb {
         // this is for entering console commands i think? who cares ignore this
         return ret;
     }
+    let categories = if gui.equip_screen.base.b_open {
+        let mut categories = Vec::new();
+        if !gui
+            .equip_screen
+            .boxes::<bindings::WeaponEquipBox>()
+            .is_empty()
+        {
+            categories.push(serde_json::Value::String("weapon".to_owned()));
+        }
+        if !gui
+            .equip_screen
+            .boxes::<bindings::DroneEquipBox>()
+            .is_empty()
+        {
+            categories.push(serde_json::Value::String("drone".to_owned()));
+        }
+        if !gui
+            .equip_screen
+            .boxes::<bindings::EquipmentBox>()
+            .is_empty()
+        {
+            categories.push(serde_json::Value::String("cargo".to_owned()));
+        }
+        if gui.equip_screen.b_over_capacity {
+            categories.push(serde_json::Value::String("over_capacity".to_owned()));
+        }
+        if !gui
+            .equip_screen
+            .boxes::<bindings::AugmentEquipBox>()
+            .is_empty()
+        {
+            categories.push(serde_json::Value::String("augmentation".to_owned()));
+        }
+        if gui.equip_screen.b_over_aug_capacity {
+            categories.push(serde_json::Value::String(
+                "augmentation_over_capacity".to_owned(),
+            ));
+        }
+        let mut meta = meta::<actions::SwapInventorySlots>();
+        add_enum(
+            prop1(prop(&mut meta.schema, "slot1"), "type"),
+            categories.clone(),
+        );
+        add_enum(
+            prop1(prop(&mut meta.schema, "slot2"), "type"),
+            categories.clone(),
+        );
+        ret.actions
+            .insert(actions::SwapInventorySlots::name(), meta);
+        Some(categories)
+    } else {
+        None
+    };
     if gui.store_screens.base.b_open {
         let store = app
             .world()
@@ -3333,8 +3393,10 @@ fn available_actions(app: &CApp) -> ActionDb {
             .unwrap()
             .store()
             .unwrap();
-        if gui.equip_screen.base.b_open {
-            ret.add::<actions::SwapInventorySlots>();
+        if let Some(categories) = categories {
+            let mut meta = meta::<actions::Sell>();
+            add_enum(prop1(prop(&mut meta.schema, "slot"), "type"), categories);
+            ret.actions.insert(actions::Sell::name(), meta);
             ret.add::<actions::Sell>();
             ret.add::<actions::BuyScreen>();
         }
@@ -3517,7 +3579,7 @@ fn available_actions(app: &CApp) -> ActionDb {
         if gui.upgrade_screen.base.b_open {
             let mut systems = Vec::new();
             if gui.upgrade_screen.reactor_button.base.base.b_active {
-                systems.push(serde_json::Value::String("reactor".to_owned()));
+                systems.push(serde_json::Value::String("Reactor".to_owned()));
             }
             IdMap::with(|map| {
                 for b in gui
@@ -3530,7 +3592,7 @@ fn available_actions(app: &CApp) -> ActionDb {
                         continue;
                     };
                     systems.push(serde_json::Value::String(
-                        map.map(bp.name.to_str()).into_owned(),
+                        map.map(bp.desc.title.to_str()).into_owned(),
                     ));
                 }
             });
@@ -3580,7 +3642,7 @@ fn available_actions(app: &CApp) -> ActionDb {
     // if gui.crew_control.save_stations.base.b_active {}
     // load crew positions button
     // if gui.crew_control.return_stations.base.b_active {}
-    let systems: HashMap<_, _> = IdMap::with(|map| {
+    let systems: Vec<_> = IdMap::with(|map| {
         gui.ship_manager()
             .unwrap()
             .systems()
@@ -3610,7 +3672,7 @@ fn available_actions(app: &CApp) -> ActionDb {
                     gui.sys_control
                         .ship_manager()
                         .unwrap()
-                        .system(**v)
+                        .system(*v)
                         .is_some_and(|x| x.b_needs_power)
                 })
                 .map(|(k, _)| serde_json::Value::String(k.clone().into_owned()))
@@ -3808,11 +3870,8 @@ fn available_actions(app: &CApp) -> ActionDb {
                     .map(|room| unsafe { xc(*room).unwrap() }.i_room_id),
             ) {
                 let mut m = meta::<actions::PlanDoorRoute>();
-                set_range(
-                    array_item(prop(&mut m.schema, "firstRoomId")),
-                    range.clone(),
-                );
-                set_range(array_item(prop(&mut m.schema, "secondRoomId")), range);
+                set_range(prop(&mut m.schema, "firstRoomId"), range.clone());
+                set_range(prop(&mut m.schema, "secondRoomId"), range);
                 ret.actions.insert(actions::PlanDoorRoute::name(), m);
             }
         }
@@ -3852,9 +3911,11 @@ fn available_actions(app: &CApp) -> ActionDb {
             })
             .collect::<Vec<_>>()
     });
-    let mut m = meta::<actions::Lockdown>();
-    add_enum(array_item(prop(&mut m.schema, "crewMemberName")), names1);
-    ret.actions.insert(actions::Lockdown::name(), m);
+    if !names1.is_empty() {
+        let mut m = meta::<actions::Lockdown>();
+        add_enum(prop(&mut m.schema, "crewMemberName"), names1);
+        ret.actions.insert(actions::Lockdown::name(), m);
+    }
     // gui.sys_control.sys_boxes - iterate to get all the systems
     // 14 MindBox
     // 13 CloneBox
