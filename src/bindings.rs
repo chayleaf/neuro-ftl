@@ -1578,6 +1578,12 @@ pub struct WeaponStoreBox {
     pub blueprint: *const WeaponBlueprint,
 }
 
+impl WeaponStoreBox {
+    pub fn blueprint(&self) -> Option<&WeaponBlueprint> {
+        unsafe { xb(self.blueprint) }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
 pub struct SystemStoreBox {
@@ -1595,6 +1601,12 @@ pub struct SystemStoreBox {
     pub free_blueprint: StdString,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x160)]
     pub drone_choice: c_int,
+}
+
+impl SystemStoreBox {
+    pub fn blueprint(&self) -> Option<&SystemBlueprint> {
+        unsafe { xb(self.blueprint) }
+    }
 }
 
 #[repr(C)]
@@ -1641,6 +1653,12 @@ pub struct DroneStoreBox {
     pub blueprint: *const DroneBlueprint,
 }
 
+impl DroneStoreBox {
+    pub fn blueprint(&self) -> Option<&DroneBlueprint> {
+        unsafe { xb(self.blueprint) }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
 pub struct CrewStoreBox {
@@ -1654,6 +1672,12 @@ pub struct CrewStoreBox {
     pub blueprint: CrewBlueprint,
 }
 
+impl CrewStoreBox {
+    pub fn blueprint(&self) -> &CrewBlueprint {
+        &self.blueprint
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
 pub struct AugmentStoreBox {
@@ -1661,6 +1685,12 @@ pub struct AugmentStoreBox {
     pub base: StoreBox,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x140)]
     pub blueprint: *const AugmentBlueprint,
+}
+
+impl AugmentStoreBox {
+    pub fn blueprint(&self) -> Option<&AugmentBlueprint> {
+        unsafe { xb(self.blueprint) }
+    }
 }
 
 #[repr(i32)]
@@ -4099,6 +4129,9 @@ impl WeaponBox {
     pub fn weapon(&self) -> Option<&ProjectileFactory> {
         unsafe { xc(self.p_weapon) }
     }
+    pub fn weapon_mut(&mut self) -> Option<&mut ProjectileFactory> {
+        unsafe { xm(self.p_weapon) }
+    }
 }
 
 #[repr(C)]
@@ -5105,11 +5138,11 @@ impl Drone {
     pub fn vtable(&self) -> &'static VtableDrone {
         unsafe { xb(self.vtable).unwrap() }
     }
-}
-
-impl Drone {
     pub fn required_power(&self) -> c_int {
         self.power_required - self.i_bonus_power
+    }
+    pub fn blueprint(&self) -> Option<&DroneBlueprint> {
+        unsafe { xb(self.blueprint) }
     }
 }
 
@@ -8001,6 +8034,11 @@ impl ShipManager {
         self.v_system_list
             .iter()
             .map(|x| unsafe { xc(*x).unwrap() })
+    }
+    pub fn systems_mut(&mut self) -> impl Iterator<Item = &mut ShipSystem> {
+        self.v_system_list
+            .iter()
+            .map(|x| unsafe { xm(*x).unwrap() })
     }
     pub fn has_crew(&self, name: &str) -> bool {
         self.v_crew_list

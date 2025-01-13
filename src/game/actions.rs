@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 // a SystemName without is_referenceable, so it isn't put in $ref, to make the schema simpler
-#[derive(Copy, Clone, Debug, Deserialize, JsonSchemaNoRef)]
+/*#[derive(Copy, Clone, Debug, Deserialize, JsonSchemaNoRef)]
 #[serde(rename_all = "snake_case")]
 pub enum SystemName {
     Shields = 0,
@@ -24,7 +24,7 @@ pub enum SystemName {
     Mind = 14,
     Hacking = 15,
     Reactor = 17,
-}
+}*/
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SkipCredits;
@@ -55,12 +55,10 @@ pub struct StartGame;
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RenameCrew {
-    pub crew_member_index: u8,
+    pub old_name: String,
     pub name: String,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct Choose0;
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct Choose1;
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -83,14 +81,14 @@ pub struct Choose9;
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct IncreasePower {
-    pub system: SystemName,
+    pub system: String,
     pub amount: u8,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DecreasePower {
-    pub system: SystemName,
+    pub system: String,
     pub amount: u8,
 }
 
@@ -104,7 +102,7 @@ pub enum TargetShip {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SetWeaponTargets {
-    pub weapon_index: u8,
+    pub weapon_name: String,
     pub target_ship: TargetShip,
     pub target_room_ids: Vec<u8>,
     pub autofire: bool,
@@ -113,30 +111,30 @@ pub struct SetWeaponTargets {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivateWeapon {
-    pub weapon_index: u8,
+    pub weapon_name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DeactivateWeapon {
-    pub weapon_index: u8,
+    pub weapon_name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivateDrone {
-    pub drone_index: u8,
+    pub drone_name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DeactivateDrone {
-    pub drone_index: u8,
+    pub drone_name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct HackSystem {
-    pub system: SystemName,
+    pub system: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -191,7 +189,7 @@ pub struct PlanDoorRoute {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MoveCrew {
-    pub crew_member_indices: Vec<u8>,
+    pub crew_member_names: Vec<String>,
     pub room_id: u8,
 }
 
@@ -217,7 +215,7 @@ pub enum InventorySlotType {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct UpgradeSystem {
-    pub system: SystemName,
+    pub system: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -226,7 +224,7 @@ pub struct UndoUpgrades;
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FireCrew {
-    pub crew_member_index: u8,
+    pub name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchemaNoRef)]
@@ -249,32 +247,32 @@ pub struct Sell {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct BuyAugmentation {
-    pub index: u8,
+    pub augment_name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct BuyWeapon {
-    pub index: u8,
+    pub weapon_name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct BuyDrone {
-    pub index: u8,
+    pub drone_name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct BuyCrew {
-    pub index: u8,
+    pub crew_member_name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct BuyConsumable {
-    pub item: ItemType,
+    pub item_name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct BuySystem {
-    pub system: SystemName,
+    pub system_name: String,
 }
 
 #[derive(Copy, Clone, Debug, Deserialize, JsonSchemaNoRef, Hash, Eq, PartialEq)]
@@ -329,31 +327,6 @@ pub struct RepairAll;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SwitchStorePage;
-
-#[derive(Copy, Clone, Debug, Deserialize, JsonSchemaNoRef, Hash, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ItemType {
-    Missiles,
-    Fuel,
-    DroneParts,
-}
-
-impl ItemType {
-    pub fn to_str(&self) -> &'static str {
-        match self {
-            Self::Missiles => "missiles",
-            Self::Fuel => "fuel",
-            Self::DroneParts => "drone_parts",
-        }
-    }
-    pub fn id(&self) -> i32 {
-        match self {
-            Self::Missiles => 0,
-            Self::Fuel => 1,
-            Self::DroneParts => 2,
-        }
-    }
-}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SellScreen;
@@ -412,9 +385,6 @@ pub enum FtlActions {
     /// Go to the main menu
     #[name = "main_menu"]
     MainMenu(MainMenu),
-    /// Choose an event option
-    #[name = "choose0"]
-    Choose0(Choose0),
     /// Choose an event option
     #[name = "choose1"]
     Choose1(Choose1),

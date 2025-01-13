@@ -26,3 +26,8 @@ WIP
 ## Testing
 
 You can use the [Neuro Simulator](https://github.com/chayleaf/rust-neuro-sama-game-api/tree/master/neuro-simulator)
+
+## Misc
+
+Stuff is indexed by its name, if the name repeats twice then (2) is
+added to the second one.

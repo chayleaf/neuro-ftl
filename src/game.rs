@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet},
+    collections::{BTreeMap, BinaryHeap, HashMap, HashSet},
     ffi::c_int,
     ops::DerefMut,
     ptr,
@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use actions::{FtlActions, InventorySlotType, ItemType, TargetShip};
+use actions::{FtlActions, InventorySlotType, TargetShip};
 use futures_util::{SinkExt, StreamExt};
 use indexmap::IndexMap;
 use neuro_sama::game::{Action, ApiMut};
@@ -16,7 +16,7 @@ use rand::Rng;
 use serde::Serialize;
 use tokio::sync::mpsc;
 
-use crate::bindings::{self, power_manager, xc, xm, CApp, Door, StoreType, System};
+use crate::bindings::{self, power_manager, xc, xm, CApp, Door, System};
 
 pub mod actions;
 mod context;
@@ -187,6 +187,27 @@ impl ShipGraph {
 impl State {
     fn app_mut(&self) -> Option<&mut CApp> {
         unsafe { xm(self.app) }
+    }
+}
+
+struct IdMap<'a>(HashMap<Cow<'a, str>, usize>);
+
+impl<'a> IdMap<'a> {
+    pub fn with<T>(x: impl FnOnce(&mut Self) -> T) -> T {
+        let mut this = Self::new();
+        x(&mut this)
+    }
+    pub fn new() -> Self {
+        Self(HashMap::new())
+    }
+    pub fn map(&mut self, x: Cow<'a, str>) -> Cow<'a, str> {
+        let v = self.0.entry(x.clone()).or_default();
+        *v += 1;
+        if *v < 2 {
+            x
+        } else {
+            format!("{x} ({})", *v).into()
+        }
     }
 }
 
@@ -362,16 +383,20 @@ impl neuro_sama::game::GameMut for State {
             }
             FtlActions::RenameCrew(event) => {
                 if self.actions.valid(&event) {
-                    if event.crew_member_index == 0 {
-                        Err(Cow::from("crew member out of range").into())
-                    } else if app.menu.ship_builder.b_open {
-                        if let Some(member) = app
-                            .menu
-                            .ship_builder
-                            .v_crew_boxes
-                            .iter()
-                            .nth((event.crew_member_index - 1).into())
-                        {
+                    if app.menu.ship_builder.b_open {
+                        if let Some(member) = IdMap::with(|map| {
+                            app.menu.ship_builder.v_crew_boxes.iter().find(|x| {
+                                unsafe { xc(**x).unwrap() }
+                                    .base
+                                    .base
+                                    .item
+                                    .crew()
+                                    .is_some_and(|x| {
+                                        map.map(x.blueprint.crew_name_long.to_str())
+                                            == event.old_name.as_str()
+                                    })
+                            })
+                        }) {
                             let member = unsafe { xm(*member).unwrap() };
                             member.base.b_quick_renaming = true;
                             member.base.name_input.b_active = true;
@@ -404,65 +429,58 @@ impl neuro_sama::game::GameMut for State {
                             ))
                             .into())
                         } else {
+                            let names =
+                                IdMap::with(|map| {
+                                    app.menu
+                                        .ship_builder
+                                        .v_crew_boxes
+                                        .iter()
+                                        .filter_map(|x| {
+                                            unsafe { xc(*x).unwrap() }.base.base.item.crew().map(
+                                                |x| map.map(x.blueprint.crew_name_long.to_str()),
+                                            )
+                                        })
+                                        .collect::<Vec<_>>()
+                                });
                             Err(Cow::from(format!(
-                                "index out of range, there are only {} crew members",
-                                app.menu.ship_builder.v_crew_boxes.len()
+                                "this crew member doesn't exist, current crew members: {}",
+                                serde_json::to_string(&names).unwrap()
                             ))
                             .into())
                         }
-                    } else if let Some(c) = app
-                        .gui()
-                        .unwrap()
-                        .ship_manager()
-                        .unwrap()
-                        .v_crew_list
-                        .get((event.crew_member_index - 1).into())
-                        .copied()
-                    {
-                        let crew = &mut app.gui_mut().unwrap().crew_screen;
-                        let cc = crew
-                            .crew_boxes
-                            .iter()
-                            .map(|x| unsafe { xm(*x).unwrap() })
-                            .find(|x| !x.base.item.is_empty() && x.base.item.p_crew == c);
-                        if let Some(cc) = cc {
-                            if cc.b_show_rename {
-                                for b in crew.crew_boxes.iter() {
-                                    let b = unsafe { xm(*b).unwrap() };
-                                    b.delete_button.base.b_hover = false;
-                                    b.rename_button.base.b_hover = false;
-                                }
-                                cc.rename_button.base.b_hover = true;
-                                unsafe {
-                                    crew.base.vtable().mouse_click(
-                                        ptr::addr_of_mut!(crew.base),
-                                        0,
-                                        0,
-                                    );
-                                }
-                                if cc.name_input.b_active {
-                                    let old = cc
-                                        .name_input
-                                        .text
-                                        .iter()
-                                        .filter_map(|x| char::from_u32(*x as u32))
-                                        .collect::<String>();
-
-                                    unsafe {
-                                        app.base.vtable().on_text_event(
-                                            ptr::addr_of_mut!(app.base),
-                                            bindings::TextEvent::Clear,
-                                        );
+                    } else {
+                        let c = IdMap::with(|map| {
+                            app.gui()
+                                .unwrap()
+                                .ship_manager()
+                                .unwrap()
+                                .v_crew_list
+                                .iter()
+                                .find(|x| {
+                                    map.map(
+                                        unsafe { xc(**x).unwrap() }
+                                            .blueprint
+                                            .crew_name_long
+                                            .to_str(),
+                                    ) == event.old_name.as_str()
+                                })
+                                .copied()
+                        });
+                        if let Some(c) = c {
+                            let crew = &mut app.gui_mut().unwrap().crew_screen;
+                            let cc = crew
+                                .crew_boxes
+                                .iter()
+                                .map(|x| unsafe { xm(*x).unwrap() })
+                                .find(|x| !x.base.item.is_empty() && x.base.item.p_crew == c);
+                            if let Some(cc) = cc {
+                                if cc.b_show_rename {
+                                    for b in crew.crew_boxes.iter() {
+                                        let b = unsafe { xm(*b).unwrap() };
+                                        b.delete_button.base.b_hover = false;
+                                        b.rename_button.base.b_hover = false;
                                     }
-                                    for char in event.name.chars() {
-                                        unsafe {
-                                            app.base.vtable().on_text_input(
-                                                ptr::addr_of_mut!(app.base),
-                                                char as i32,
-                                            );
-                                        }
-                                    }
-                                    let crew = &mut app.gui_mut().unwrap().crew_screen;
+                                    cc.rename_button.base.b_hover = true;
                                     unsafe {
                                         crew.base.vtable().mouse_click(
                                             ptr::addr_of_mut!(crew.base),
@@ -470,31 +488,83 @@ impl neuro_sama::game::GameMut for State {
                                             0,
                                         );
                                     }
-                                    Ok(Cow::from(format!(
+                                    if cc.name_input.b_active {
+                                        let old = cc
+                                            .name_input
+                                            .text
+                                            .iter()
+                                            .filter_map(|x| char::from_u32(*x as u32))
+                                            .collect::<String>();
+
+                                        unsafe {
+                                            app.base.vtable().on_text_event(
+                                                ptr::addr_of_mut!(app.base),
+                                                bindings::TextEvent::Clear,
+                                            );
+                                        }
+                                        for char in event.name.chars() {
+                                            unsafe {
+                                                app.base.vtable().on_text_input(
+                                                    ptr::addr_of_mut!(app.base),
+                                                    char as i32,
+                                                );
+                                            }
+                                        }
+                                        let crew = &mut app.gui_mut().unwrap().crew_screen;
+                                        unsafe {
+                                            crew.base.vtable().mouse_click(
+                                                ptr::addr_of_mut!(crew.base),
+                                                0,
+                                                0,
+                                            );
+                                        }
+                                        Ok(Cow::from(format!(
                                             "renamed the crew member, old name is {old:?}, new name is {:?}",
                                             event.name
                                         ))
                                         .into())
-                                } else {
-                                    Err(Cow::from(
+                                    } else {
+                                        Err(Cow::from(
                                         "couldn't rename the crew member, this is a bug in the mod",
                                     )
                                     .into())
+                                    }
+                                } else {
+                                    Err(Cow::from("can't rename the crew member").into())
                                 }
                             } else {
-                                Err(Cow::from("can't rename the crew member").into())
+                                Err(Cow::from(
+                                    "crew member box not found, this is probably a bug in the mod",
+                                )
+                                .into())
                             }
                         } else {
-                            Err(Cow::from(
-                                "crew member box not found, this is probably a bug in the mod",
-                            )
+                            let names = IdMap::with(|map| {
+                                app.gui()
+                                    .unwrap()
+                                    .ship_manager()
+                                    .unwrap()
+                                    .v_crew_list
+                                    .iter()
+                                    .map(|x| {
+                                        map.map(
+                                            unsafe { xc(*x).unwrap() }
+                                                .blueprint
+                                                .crew_name_long
+                                                .to_str(),
+                                        )
+                                    })
+                                    .collect::<Vec<_>>()
+                            });
+                            Err(Cow::from(format!(
+                                "this crew member doesn't exist, current crew members: {}",
+                                serde_json::to_string(&names).unwrap()
+                            ))
                             .into())
                         }
-                    } else {
-                        Err(Cow::from("crew member out of range").into())
                     }
                 } else {
-                    Err(Cow::from("can't rename the ship at this time").into())
+                    Err(Cow::from("can't rename crew at this time").into())
                 }
             }
             FtlActions::StartGame(event) => {
@@ -576,8 +646,7 @@ impl neuro_sama::game::GameMut for State {
                     Err(Cow::from("can't enter the main menu at this time").into())
                 }
             }
-            FtlActions::Choose0(_)
-            | FtlActions::Choose1(_)
+            FtlActions::Choose1(_)
             | FtlActions::Choose2(_)
             | FtlActions::Choose3(_)
             | FtlActions::Choose4(_)
@@ -587,16 +656,15 @@ impl neuro_sama::game::GameMut for State {
             | FtlActions::Choose8(_)
             | FtlActions::Choose9(_) => {
                 let (index, valid) = match action {
-                    FtlActions::Choose0(event) => (0usize, self.actions.valid(&event)),
-                    FtlActions::Choose1(event) => (1usize, self.actions.valid(&event)),
-                    FtlActions::Choose2(event) => (2usize, self.actions.valid(&event)),
-                    FtlActions::Choose3(event) => (3usize, self.actions.valid(&event)),
-                    FtlActions::Choose4(event) => (4usize, self.actions.valid(&event)),
-                    FtlActions::Choose5(event) => (5usize, self.actions.valid(&event)),
-                    FtlActions::Choose6(event) => (6usize, self.actions.valid(&event)),
-                    FtlActions::Choose7(event) => (7usize, self.actions.valid(&event)),
-                    FtlActions::Choose8(event) => (8usize, self.actions.valid(&event)),
-                    FtlActions::Choose9(event) => (9usize, self.actions.valid(&event)),
+                    FtlActions::Choose1(event) => (0usize, self.actions.valid(&event)),
+                    FtlActions::Choose2(event) => (1usize, self.actions.valid(&event)),
+                    FtlActions::Choose3(event) => (2usize, self.actions.valid(&event)),
+                    FtlActions::Choose4(event) => (3usize, self.actions.valid(&event)),
+                    FtlActions::Choose5(event) => (4usize, self.actions.valid(&event)),
+                    FtlActions::Choose6(event) => (5usize, self.actions.valid(&event)),
+                    FtlActions::Choose7(event) => (6usize, self.actions.valid(&event)),
+                    FtlActions::Choose8(event) => (7usize, self.actions.valid(&event)),
+                    FtlActions::Choose9(event) => (8usize, self.actions.valid(&event)),
                     _ => panic!(),
                 };
                 if valid {
@@ -646,15 +714,18 @@ impl neuro_sama::game::GameMut for State {
                     _ => unreachable!(),
                 };
                 if valid {
-                    let system = System::from_id(system as i32).unwrap();
-                    if let Some(system) = app
-                        .gui_mut()
-                        .unwrap()
-                        .sys_control
-                        .ship_manager_mut()
-                        .unwrap()
-                        .system_mut(system)
-                    {
+                    let system = IdMap::with(|map| {
+                        app.gui_mut()
+                            .unwrap()
+                            .ship_manager_mut()
+                            .unwrap()
+                            .systems_mut()
+                            .find(|x| {
+                                map.map(System::from_id(x.i_system_type).unwrap().name().into())
+                                    == system
+                            })
+                    });
+                    if let Some(system) = system {
                         if increase {
                             if system.i_lock_count == -1 || system.i_lock_count > 0 {
                                 Err(Cow::from("the system can't be controlled at the time").into())
@@ -717,7 +788,23 @@ impl neuro_sama::game::GameMut for State {
                             )
                         }
                     } else {
-                        Err(Cow::from("the system does not exist in this ship").into())
+                        let systems = IdMap::with(|map| {
+                            app.gui()
+                                .unwrap()
+                                .ship_manager()
+                                .unwrap()
+                                .systems()
+                                .filter_map(|x| {
+                                    System::from_id(x.i_system_type)
+                                        .map(|x| map.map(x.name().into()))
+                                })
+                                .collect::<Vec<_>>()
+                        });
+                        Err(Cow::from(format!(
+                            "this system doesn't exist, current systems: {}",
+                            serde_json::to_string(&systems).unwrap()
+                        ))
+                        .into())
                     }
                 } else if increase {
                     Err(Cow::from("can't increase a system's power at the time").into())
@@ -733,13 +820,23 @@ impl neuro_sama::game::GameMut for State {
                 } else {
                     let gui = app.gui().unwrap();
                     let ship_manager = gui.ship_manager().unwrap();
-                    let weapons = ship_manager.weapon_system().unwrap();
-                    if let Some(weapon) = weapons
-                        .weapons
-                        .get(event.weapon_index.into())
-                        .filter(|x| !x.is_null())
-                    {
-                        let weapon = unsafe { xm(*weapon).unwrap() };
+                    let cc = &gui.combat_control;
+                    let b = IdMap::with(|map| {
+                        cc.weap_control
+                            .base
+                            .boxes
+                            .iter()
+                            .map(|x| x.cast::<bindings::WeaponBox>())
+                            .find(|x| {
+                                unsafe { xc(*x).unwrap() }.weapon().is_some_and(|x| {
+                                    x.blueprint().is_some_and(|x| {
+                                        map.map(x.desc.title.to_str()) == event.weapon_name
+                                    })
+                                })
+                            })
+                    });
+                    if let Some(b) = b {
+                        let weapon = unsafe { xm(b).unwrap() }.weapon_mut().unwrap();
                         if event.target_ship == TargetShip::Player
                             && !weapon.blueprint().unwrap().can_target_self()
                         {
@@ -819,17 +916,35 @@ impl neuro_sama::game::GameMut for State {
                             }
                         }
                     } else {
-                        Err(Cow::from("no weapon with this index").into())
+                        let weapons: Vec<_> = IdMap::with(|map| {
+                            cc.weap_control
+                                .base
+                                .boxes
+                                .iter()
+                                .map(|x| x.cast::<bindings::WeaponBox>())
+                                .map(|x| unsafe { xc(x).unwrap() })
+                                .filter_map(|x| {
+                                    x.weapon().and_then(|x| {
+                                        x.blueprint().map(|x| map.map(x.desc.title.to_str()))
+                                    })
+                                })
+                                .collect()
+                        });
+                        Err(Cow::from(format!(
+                            "no weapon with this name, available weapons: {}",
+                            serde_json::to_string(&weapons).unwrap()
+                        ))
+                        .into())
                     }
                 }
             }
             FtlActions::ActivateDrone(_) | FtlActions::DeactivateDrone(_) => {
-                let (index, valid, activate) = match action {
+                let (valid, drone_name, activate) = match action {
                     FtlActions::ActivateDrone(event) => {
-                        (event.drone_index, self.actions.valid(&event), true)
+                        (self.actions.valid(&event), event.drone_name, true)
                     }
                     FtlActions::DeactivateDrone(event) => {
-                        (event.drone_index, self.actions.valid(&event), false)
+                        (self.actions.valid(&event), event.drone_name, false)
                     }
                     _ => unreachable!(),
                 };
@@ -847,18 +962,22 @@ impl neuro_sama::game::GameMut for State {
                         .into())
                     } else {
                         let cc = &app.gui().unwrap().combat_control;
-                        if index > 0 && usize::from(index - 1) >= cc.drone_control.base.boxes.len()
-                        {
-                            Err(Cow::from("index out of range").into())
-                        } else if let Some(b) = cc
-                            .drone_control
-                            .base
-                            .boxes
-                            .get((index - 1).into())
-                            .map(|x| x.cast::<bindings::DroneBox>())
-                            .map(|x| unsafe { xc(x).unwrap() })
-                            .filter(|x| x.drone().is_some())
-                        {
+                        let b = IdMap::with(|map| {
+                            cc.drone_control
+                                .base
+                                .boxes
+                                .iter()
+                                .map(|x| x.cast::<bindings::DroneBox>())
+                                .map(|x| unsafe { xc(x).unwrap() })
+                                .find(|x| {
+                                    x.drone().is_some_and(|x| {
+                                        x.blueprint().is_some_and(|x| {
+                                            map.map(x.desc.title.to_str()) == drone_name
+                                        })
+                                    })
+                                })
+                        });
+                        if let Some(b) = b {
                             let ship_manager = app.gui_mut().unwrap().ship_manager_mut().unwrap();
                             let drone_system = ship_manager.drone_system().unwrap();
                             let drone = b.drone().unwrap();
@@ -924,18 +1043,36 @@ impl neuro_sama::game::GameMut for State {
                                 .into())
                             }
                         } else {
-                            Err(Cow::from("this drone slot is empty").into())
+                            let drones: Vec<_> = IdMap::with(|map| {
+                                cc.drone_control
+                                    .base
+                                    .boxes
+                                    .iter()
+                                    .map(|x| x.cast::<bindings::DroneBox>())
+                                    .map(|x| unsafe { xc(x).unwrap() })
+                                    .filter_map(|x| {
+                                        x.drone().and_then(|x| {
+                                            x.blueprint().map(|x| map.map(x.desc.title.to_str()))
+                                        })
+                                    })
+                                    .collect()
+                            });
+                            Err(Cow::from(format!(
+                                "no drone with this name, available drones: {}",
+                                serde_json::to_string(&drones).unwrap()
+                            ))
+                            .into())
                         }
                     }
                 }
             }
             FtlActions::ActivateWeapon(_) | FtlActions::DeactivateWeapon(_) => {
-                let (index, valid, activate) = match action {
+                let (valid, weapon_name, activate) = match action {
                     FtlActions::ActivateWeapon(event) => {
-                        (event.weapon_index, self.actions.valid(&event), true)
+                        (self.actions.valid(&event), event.weapon_name, true)
                     }
                     FtlActions::DeactivateWeapon(event) => {
-                        (event.weapon_index, self.actions.valid(&event), false)
+                        (self.actions.valid(&event), event.weapon_name, false)
                     }
                     _ => unreachable!(),
                 };
@@ -954,17 +1091,22 @@ impl neuro_sama::game::GameMut for State {
                         .into())
                     } else {
                         let cc = &app.gui().unwrap().combat_control;
-                        if index > 0 && usize::from(index - 1) >= cc.weap_control.base.boxes.len() {
-                            Err(Cow::from("index out of range").into())
-                        } else if let Some(b) = cc
-                            .weap_control
-                            .base
-                            .boxes
-                            .get((index - 1).into())
-                            .map(|x| x.cast::<bindings::WeaponBox>())
-                            .map(|x| unsafe { xc(x).unwrap() })
-                            .filter(|x| x.weapon().is_some())
-                        {
+                        let b = IdMap::with(|map| {
+                            cc.weap_control
+                                .base
+                                .boxes
+                                .iter()
+                                .map(|x| x.cast::<bindings::WeaponBox>())
+                                .map(|x| unsafe { xc(x).unwrap() })
+                                .find(|x| {
+                                    x.weapon().is_some_and(|x| {
+                                        x.blueprint().is_some_and(|x| {
+                                            map.map(x.desc.title.to_str()) == weapon_name
+                                        })
+                                    })
+                                })
+                        });
+                        if let Some(b) = b {
                             let ship_manager = app.gui_mut().unwrap().ship_manager_mut().unwrap();
                             let weapon_system = ship_manager.weapon_system().unwrap();
                             let weapon = b.weapon().unwrap();
@@ -1018,7 +1160,25 @@ impl neuro_sama::game::GameMut for State {
                                 .into())
                             }
                         } else {
-                            Err(Cow::from("this weapon slot is empty").into())
+                            let weapons: Vec<_> = IdMap::with(|map| {
+                                cc.weap_control
+                                    .base
+                                    .boxes
+                                    .iter()
+                                    .map(|x| x.cast::<bindings::WeaponBox>())
+                                    .map(|x| unsafe { xc(x).unwrap() })
+                                    .filter_map(|x| {
+                                        x.weapon().and_then(|x| {
+                                            x.blueprint().map(|x| map.map(x.desc.title.to_str()))
+                                        })
+                                    })
+                                    .collect()
+                            });
+                            Err(Cow::from(format!(
+                                "no weapon with this name, available weapons: {}",
+                                serde_json::to_string(&weapons).unwrap()
+                            ))
+                            .into())
                         }
                     }
                 }
@@ -1028,10 +1188,15 @@ impl neuro_sama::game::GameMut for State {
                     Err(Cow::from("can't launch a hacking drone at the time").into())
                 } else {
                     let gui = app.gui_mut().unwrap();
-                    let system = System::from_id(event.system as i32).unwrap();
                     if let Some(target) = gui.combat_control.current_target_mut() {
                         let target = target.ship_manager_mut().unwrap();
-                        if let Some(system) = target.system_mut(system) {
+                        let system = IdMap::with(|map| {
+                            target.systems_mut().find(|x| {
+                                map.map(System::from_id(x.i_system_type).unwrap().name().into())
+                                    == event.system
+                            })
+                        });
+                        if let Some(system) = system {
                             let system = ptr::addr_of_mut!(*system);
                             let drone_count = gui.ship_manager().unwrap().drone_count();
                             let jumping = gui.ship_manager().unwrap().b_jumping;
@@ -1079,10 +1244,19 @@ impl neuro_sama::game::GameMut for State {
                                 Ok(Cow::from("successfully launched a drone").into())
                             }
                         } else {
-                            let system = system.to_string();
+                            let systems = IdMap::with(|map| {
+                                target
+                                    .systems()
+                                    .map(|x| {
+                                        map.map(
+                                            System::from_id(x.i_system_type).unwrap().name().into(),
+                                        )
+                                    })
+                                    .collect::<Vec<_>>()
+                            });
                             Err(Cow::from(format!(
-                                "the enemy ship doesn't have {}",
-                                super::library().text(&system).unwrap_or(&system)
+                                "the enemy ship doesn't have this system, available systems: {}",
+                                serde_json::to_string(&systems).unwrap()
                             ))
                             .into())
                         }
@@ -1570,20 +1744,65 @@ impl neuro_sama::game::GameMut for State {
                     Err(Cow::from("can't move crew members at the time").into())
                 } else {
                     let actions::MoveCrew {
-                        crew_member_indices,
+                        mut crew_member_names,
                         room_id,
                     } = event;
                     let gui = app.gui().unwrap();
                     let crew = &gui.ship_manager().unwrap().v_crew_list;
-                    match crew_member_indices
-                        .into_iter()
-                        .map(|x| {
-                            crew.get(x.into()).map(|c| (x, *c)).ok_or_else(|| {
-                                Some(Cow::from(format!("crew member index {x} is out of range")))
+                    let crew_map: HashMap<_, _> = IdMap::with(|map| {
+                        crew.iter()
+                            .map(|c| {
+                                (
+                                    map.map(
+                                        unsafe { xc(*c).unwrap() }
+                                            .blueprint
+                                            .crew_name_long
+                                            .to_str(),
+                                    ),
+                                    c,
+                                )
                             })
-                        })
-                        .collect::<Result<Vec<_>, _>>()
-                    {
+                            .collect()
+                    });
+                    crew_member_names.sort();
+                    let mut ret = Ok(());
+                    for x in crew_member_names.windows(2) {
+                        if x[0] == x[1] {
+                            ret = Err(Some(Cow::from(format!(
+                                "duplicate crew member: {:?}",
+                                x[0]
+                            ))));
+                            break;
+                        }
+                    }
+                    match ret.and_then(|()| {
+                        crew_member_names
+                            .into_iter()
+                            .map(|x| {
+                                if let Some(c) = crew_map.get(x.as_str()) {
+                                    Ok((x, **c))
+                                } else {
+                                    let names = IdMap::with(|map| {
+                                        crew.iter()
+                                            .map(|x| {
+                                                map.map(
+                                                    unsafe { xc(*x).unwrap() }
+                                                        .blueprint
+                                                        .crew_name_long
+                                                        .to_str(),
+                                                )
+                                            })
+                                            .collect::<Vec<_>>()
+                                    });
+                                    Err(Some(Cow::from(format!(
+                                        "crew member {:?} doesn't exist, current crew members: {}",
+                                        x,
+                                        serde_json::to_string(&names).unwrap()
+                                    ))))
+                                }
+                            })
+                            .collect::<Result<Vec<_>, _>>()
+                    }) {
                         Ok(crew) => {
                             let mut err = None;
                             let mut crew1 = Vec::new();
@@ -1596,13 +1815,13 @@ impl neuro_sama::game::GameMut for State {
                                     && (c.y - c.current_slot.world_location.y as f32).abs() < 0.5
                                 {
                                     err = Some(Some(Cow::from(format!(
-                                        "the crew member {i} is stunned or something like that idk"
+                                        "the crew member {i:?} is stunned or something like that idk"
                                     ))));
                                     break;
                                 }
                                 if c.b_dead {
                                     err = Some(Some(Cow::from(format!(
-                                        "the crew member {i} is currently dead"
+                                        "the crew member {i:?} is currently dead"
                                     ))));
                                     break;
                                 }
@@ -1757,7 +1976,7 @@ impl neuro_sama::game::GameMut for State {
                                     .then_some(e.over_aug_box.cast())
                                     .ok_or_else(|| {
                                         Some(Cow::from(format!(
-                                            "there are only {} over-capacity augment slots",
+                                            "there is only {} over-capacity augment slot",
                                             u8::from(e.b_over_aug_capacity)
                                         )))
                                     }),
@@ -1766,7 +1985,7 @@ impl neuro_sama::game::GameMut for State {
                                     .then_some(e.overcapacity_box)
                                     .ok_or_else(|| {
                                         Some(Cow::from(format!(
-                                            "there are only {} over-capacity slots",
+                                            "there is only {} over-capacity slot",
                                             u8::from(e.b_over_capacity)
                                         )))
                                     }),
@@ -1923,77 +2142,100 @@ impl neuro_sama::game::GameMut for State {
                     let system = event.system;
                     let gui = app.gui_mut().unwrap();
                     let upgrades = &mut gui.upgrade_screen;
-                    match system {
-                        actions::SystemName::Reactor => {
-                            let cost = upgrades.reactor_button.reactor_cost();
-                            let scrap = upgrades.ship_manager().unwrap().current_scrap;
-                            if cost > scrap {
-                                Err(Cow::from(format!(
-                                    "the reactor upgrade costs {cost} scrap, you only have {scrap}"
-                                ))
-                                .into())
-                            } else if power_manager(upgrades.ship_manager().unwrap().i_ship_id)
-                                .is_some_and(|x| {
-                                    x.current_power.second + upgrades.reactor_button.temp_upgrade
-                                        >= 25
-                                })
-                            {
-                                Err(Cow::from("the reactor is already at max power (25)").into())
-                            } else {
-                                let btn = &mut upgrades.reactor_button;
-                                btn.base.base.b_hover = true;
-                                unsafe {
-                                    btn.base
-                                        .base
-                                        .vtable()
-                                        .on_click(ptr::addr_of_mut!(btn.base.base));
-                                }
-                                Ok(Cow::from("successfully updated the reactor").into())
+                    if system.as_str() == "reactor" {
+                        let cost = upgrades.reactor_button.reactor_cost();
+                        let scrap = upgrades.ship_manager().unwrap().current_scrap;
+                        if cost > scrap {
+                            Err(Cow::from(format!(
+                                "the reactor upgrade costs {cost} scrap, you only have {scrap}"
+                            ))
+                            .into())
+                        } else if power_manager(upgrades.ship_manager().unwrap().i_ship_id)
+                            .is_some_and(|x| {
+                                x.current_power.second + upgrades.reactor_button.temp_upgrade >= 25
+                            })
+                        {
+                            Err(Cow::from("the reactor is already at max power (25)").into())
+                        } else {
+                            let btn = &mut upgrades.reactor_button;
+                            btn.base.base.b_hover = true;
+                            unsafe {
+                                btn.base
+                                    .base
+                                    .vtable()
+                                    .on_click(ptr::addr_of_mut!(btn.base.base));
                             }
+                            Ok(Cow::from("successfully updated the reactor").into())
                         }
-                        system => {
-                            if let Some(c) = upgrades.v_upgrade_boxes.iter().copied().find(|x| {
-                                unsafe { xc(*x).unwrap() }
-                                    .system()
-                                    .is_some_and(|x| x.i_system_type == system as i32)
-                            }) {
-                                let b = unsafe { xc(c).unwrap() };
-                                if b.system().unwrap().power_state.second + b.temp_upgrade
-                                    < b.system().unwrap().max_level
-                                {
-                                    for b in upgrades.v_upgrade_boxes.iter() {
-                                        let b = unsafe { xm(*b).unwrap() };
-                                        if let Some(b) = b.current_button_mut() {
-                                            b.base.b_hover = false;
-                                        }
+                    } else {
+                        let c = IdMap::with(|map| {
+                            upgrades.v_upgrade_boxes.iter().copied().find(|x| {
+                                unsafe { xc(*x).unwrap() }.system().is_some_and(|x| {
+                                    System::from_id(x.i_system_type)
+                                        .is_some_and(|x| map.map(x.name().into()) == system)
+                                })
+                            })
+                        });
+                        if let Some(c) = c {
+                            let b = unsafe { xc(c).unwrap() };
+                            if b.system().unwrap().power_state.second + b.temp_upgrade
+                                < b.system().unwrap().max_level
+                            {
+                                for b in upgrades.v_upgrade_boxes.iter() {
+                                    let b = unsafe { xm(*b).unwrap() };
+                                    if let Some(b) = b.current_button_mut() {
+                                        b.base.b_hover = false;
                                     }
-                                    let b = unsafe { xm(c).unwrap() };
-                                    b.current_button_mut().unwrap().base.b_hover = true;
-                                    upgrades.base.b_close_button_selected = false;
-                                    upgrades.undo_button.base.b_hover = false;
-                                    upgrades.reactor_button.base.base.b_hover = false;
-                                    unsafe {
-                                        upgrades.base.vtable().mouse_click(
-                                            ptr::addr_of_mut!(upgrades.base),
-                                            0,
-                                            0,
-                                        );
-                                    }
-                                    Ok(Cow::from(format!(
+                                }
+                                let b = unsafe { xm(c).unwrap() };
+                                b.current_button_mut().unwrap().base.b_hover = true;
+                                upgrades.base.b_close_button_selected = false;
+                                upgrades.undo_button.base.b_hover = false;
+                                upgrades.reactor_button.base.base.b_hover = false;
+                                unsafe {
+                                    upgrades.base.vtable().mouse_click(
+                                        ptr::addr_of_mut!(upgrades.base),
+                                        0,
+                                        0,
+                                    );
+                                }
+                                Ok(Cow::from(format!(
                                         "will upgrade the {} system to level {} once you leave the upgrades screen",
                                         b.blueprint().unwrap().desc.title.to_str(),
                                         b.system().unwrap().power_state.second + b.temp_upgrade),
                                     ).into())
-                                } else {
-                                    Err(Cow::from(format!(
-                                        "the system is already at max level ({})",
-                                        b.system().unwrap().max_level
-                                    ))
-                                    .into())
-                                }
                             } else {
-                                Err(Cow::from("the system you specified can't be upgraded").into())
+                                Err(Cow::from(format!(
+                                    "the system is already at max level ({})",
+                                    b.system().unwrap().max_level
+                                ))
+                                .into())
                             }
+                        } else {
+                            let mut systems = Vec::new();
+                            if gui.upgrade_screen.reactor_button.base.base.b_active {
+                                systems.push(serde_json::Value::String("reactor".to_owned()));
+                            }
+                            IdMap::with(|map| {
+                                for b in gui
+                                    .upgrade_screen
+                                    .v_upgrade_boxes
+                                    .iter()
+                                    .map(|x| unsafe { xc(*x).unwrap() })
+                                {
+                                    let Some(bp) = b.blueprint() else {
+                                        continue;
+                                    };
+                                    systems.push(serde_json::Value::String(
+                                        map.map(bp.name.to_str()).into_owned(),
+                                    ));
+                                }
+                            });
+                            Err(Cow::from(format!(
+                                "this system can't be upgraded, upgradeable systems: {}",
+                                serde_json::to_string(&systems).unwrap()
+                            ))
+                            .into())
                         }
                     }
                 }
@@ -2027,15 +2269,22 @@ impl neuro_sama::game::GameMut for State {
                     Err(Cow::from("can't fire crew members at the time").into())
                 } else {
                     let gui = app.gui_mut().unwrap();
-                    if event.crew_member_index == 0 {
-                        Err(Cow::from("crew member out of range").into())
-                    } else if let Some(c) = gui
-                        .ship_manager()
-                        .unwrap()
-                        .v_crew_list
-                        .get((event.crew_member_index - 1).into())
-                        .copied()
-                    {
+                    let c = IdMap::with(|map| {
+                        gui.ship_manager()
+                            .unwrap()
+                            .v_crew_list
+                            .iter()
+                            .find(|x| {
+                                map.map(
+                                    unsafe { xc(**x).unwrap() }
+                                        .blueprint
+                                        .crew_name_long
+                                        .to_str(),
+                                ) == event.name.as_str()
+                            })
+                            .copied()
+                    });
+                    if let Some(c) = c {
                         let crew = &mut gui.crew_screen;
                         if let Some(cc) = crew
                             .crew_boxes
@@ -2059,7 +2308,28 @@ impl neuro_sama::game::GameMut for State {
                             .into())
                         }
                     } else {
-                        Err(Cow::from("crew member out of range").into())
+                        let names = IdMap::with(|map| {
+                            app.gui()
+                                .unwrap()
+                                .ship_manager()
+                                .unwrap()
+                                .v_crew_list
+                                .iter()
+                                .map(|x| {
+                                    map.map(
+                                        unsafe { xc(*x).unwrap() }
+                                            .blueprint
+                                            .crew_name_long
+                                            .to_str(),
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                        });
+                        Err(Cow::from(format!(
+                            "this crew member doesn't exist, current crew members: {}",
+                            serde_json::to_string(&names).unwrap()
+                        ))
+                        .into())
                     }
                 }
             }
@@ -2364,34 +2634,24 @@ impl neuro_sama::game::GameMut for State {
             | FtlActions::BuyCrew(_)
             | FtlActions::Repair1(_)
             | FtlActions::RepairAll(_) => {
-                let (valid, kind, index) = match &action {
-                    FtlActions::BuyDrone(event) => {
-                        (self.actions.valid(event), StoreType::Drones, event.index)
-                    }
-                    FtlActions::BuyWeapon(event) => {
-                        (self.actions.valid(event), StoreType::Weapons, event.index)
-                    }
+                let (valid, error) = match &action {
+                    FtlActions::BuyDrone(event) => (self.actions.valid(event), "drones"),
+                    FtlActions::BuyWeapon(event) => (self.actions.valid(event), "weapons"),
                     FtlActions::BuyAugmentation(event) => {
-                        (self.actions.valid(event), StoreType::Augments, event.index)
+                        (self.actions.valid(event), "augmentations")
                     }
-                    FtlActions::BuyCrew(event) => {
-                        (self.actions.valid(event), StoreType::Crew, event.index)
-                    }
-                    FtlActions::BuyConsumable(event) => {
-                        (self.actions.valid(event), StoreType::Items, 0)
-                    }
-                    FtlActions::BuySystem(event) => {
-                        (self.actions.valid(event), StoreType::Systems, 0)
-                    }
-                    FtlActions::Repair1(event) => (self.actions.valid(event), StoreType::None, 0),
-                    FtlActions::RepairAll(event) => (self.actions.valid(event), StoreType::None, 0),
+                    FtlActions::BuyCrew(event) => (self.actions.valid(event), "crew"),
+                    FtlActions::BuyConsumable(event) => (self.actions.valid(event), "items"),
+                    FtlActions::BuySystem(event) => (self.actions.valid(event), "systems"),
+                    FtlActions::Repair1(event) => (self.actions.valid(event), ""),
+                    FtlActions::RepairAll(event) => (self.actions.valid(event), ""),
                     _ => unreachable!(),
                 };
                 if !valid {
-                    if kind == StoreType::None {
+                    if matches!(&action, FtlActions::Repair1(_) | FtlActions::RepairAll(_)) {
                         Err(Cow::from("can't repair your ship at the time").into())
                     } else {
-                        Err(Cow::from(format!("can't buy {kind} at the time")).into())
+                        Err(Cow::from(format!("can't buy {error} at the time")).into())
                     }
                 } else {
                     let store = app
@@ -2401,31 +2661,90 @@ impl neuro_sama::game::GameMut for State {
                         .unwrap()
                         .store_mut()
                         .unwrap();
-                    let boxes = store.active_boxes_for(kind);
-                    let b = match (index, action) {
-                        (_, FtlActions::BuySystem(event)) => boxes.iter().find(|x| {
-                            System::from_id(
-                                unsafe { xc(x.cast::<bindings::SystemStoreBox>()).unwrap() }.type_,
-                            ) == System::from_id(event.system as i32)
+                    let b = match &action {
+                        FtlActions::BuyDrone(event) => IdMap::with(|map| {
+                            store
+                                .active_boxes::<bindings::DroneStoreBox>()
+                                .into_iter()
+                                .find(|x| {
+                                    unsafe { xc(*x).unwrap() }
+                                        .blueprint()
+                                        .map(|x| map.map(x.desc.title.to_str()))
+                                        == Some(Cow::Borrowed(&event.drone_name))
+                                })
+                                .map(|x| ptr::addr_of_mut!(unsafe { xm(x).unwrap() }.base))
                         }),
-                        (_, FtlActions::BuyConsumable(event)) => boxes.iter().find(|x| {
-                            unsafe { xc(x.cast::<bindings::ItemStoreBox>()).unwrap() }
-                                .blueprint()
-                                .unwrap()
-                                .base
-                                .type_
-                                == event.item.id()
+                        FtlActions::BuyWeapon(event) => IdMap::with(|map| {
+                            store
+                                .active_boxes::<bindings::WeaponStoreBox>()
+                                .into_iter()
+                                .find(|x| {
+                                    unsafe { xc(*x).unwrap() }
+                                        .blueprint()
+                                        .map(|x| map.map(x.desc.title.to_str()))
+                                        == Some(Cow::Borrowed(&event.weapon_name))
+                                })
+                                .map(|x| ptr::addr_of_mut!(unsafe { xm(x).unwrap() }.base))
                         }),
-                        (_, FtlActions::Repair1(_)) => boxes.iter().find(|x| {
-                            !unsafe { xc(x.cast::<bindings::RepairStoreBox>()).unwrap() }.repair_all
+                        FtlActions::BuyAugmentation(event) => IdMap::with(|map| {
+                            store
+                                .active_boxes::<bindings::AugmentStoreBox>()
+                                .into_iter()
+                                .find(|x| {
+                                    unsafe { xc(*x).unwrap() }
+                                        .blueprint()
+                                        .map(|x| map.map(x.desc.title.to_str()))
+                                        == Some(Cow::Borrowed(&event.augment_name))
+                                })
+                                .map(|x| ptr::addr_of_mut!(unsafe { xm(x).unwrap() }.base))
                         }),
-                        (_, FtlActions::RepairAll(_)) => boxes.iter().find(|x| {
-                            unsafe { xc(x.cast::<bindings::RepairStoreBox>()).unwrap() }.repair_all
+                        FtlActions::BuyCrew(event) => IdMap::with(|map| {
+                            store
+                                .active_boxes::<bindings::CrewStoreBox>()
+                                .into_iter()
+                                .find(|x| {
+                                    map.map(
+                                        unsafe { xc(*x).unwrap() }.blueprint().desc.title.to_str(),
+                                    ) == Cow::Borrowed(&event.crew_member_name)
+                                })
+                                .map(|x| ptr::addr_of_mut!(unsafe { xm(x).unwrap() }.base))
                         }),
-                        (0, _) => None,
-                        (index, _) => boxes.get(usize::from(index - 1)),
-                    }
-                    .copied();
+                        FtlActions::BuyConsumable(event) => IdMap::with(|map| {
+                            store
+                                .active_boxes::<bindings::ItemStoreBox>()
+                                .into_iter()
+                                .find(|x| {
+                                    unsafe { xc(*x).unwrap() }
+                                        .blueprint()
+                                        .map(|x| map.map(x.base.desc.title.to_str()))
+                                        == Some(Cow::Borrowed(&event.item_name))
+                                })
+                                .map(|x| ptr::addr_of_mut!(unsafe { xm(x).unwrap() }.base))
+                        }),
+                        FtlActions::BuySystem(event) => IdMap::with(|map| {
+                            store
+                                .active_boxes::<bindings::SystemStoreBox>()
+                                .into_iter()
+                                .find(|x| {
+                                    unsafe { xc(*x).unwrap() }
+                                        .blueprint()
+                                        .map(|x| map.map(x.desc.title.to_str()))
+                                        == Some(Cow::Borrowed(&event.system_name))
+                                })
+                                .map(|x| ptr::addr_of_mut!(unsafe { xm(x).unwrap() }.base))
+                        }),
+                        FtlActions::Repair1(_) => store
+                            .active_boxes::<bindings::RepairStoreBox>()
+                            .into_iter()
+                            .find(|x| !unsafe { xc(*x).unwrap() }.repair_all)
+                            .map(|x| ptr::addr_of_mut!(unsafe { xm(x).unwrap() }.base)),
+                        FtlActions::RepairAll(_) => store
+                            .active_boxes::<bindings::RepairStoreBox>()
+                            .into_iter()
+                            .find(|x| unsafe { xc(*x).unwrap() }.repair_all)
+                            .map(|x| ptr::addr_of_mut!(unsafe { xm(x).unwrap() }.base)),
+                        _ => unreachable!(),
+                    };
                     if let Some(c) = b {
                         let b = unsafe { xc(c).unwrap() };
                         if b.button.base.b_active {
@@ -2444,7 +2763,7 @@ impl neuro_sama::game::GameMut for State {
                                     0,
                                 );
                             }
-                            if kind == StoreType::Systems
+                            if matches!(&action, FtlActions::BuySystem(_))
                                 && unsafe { xc(c.cast::<bindings::SystemStoreBox>()).unwrap() }
                                     .b_confirming
                             {
@@ -2455,7 +2774,10 @@ impl neuro_sama::game::GameMut for State {
                                         .to_str()
                                 ))
                                 .into())
-                            } else if kind == StoreType::None {
+                            } else if matches!(
+                                action,
+                                FtlActions::Repair1(_) | FtlActions::RepairAll(_)
+                            ) {
                                 let hull = store.shopper().unwrap().ship.hull_integrity;
                                 Ok(Cow::from(format!(
                                     "successfully repaired ship hull to {}/{} HP",
@@ -2626,45 +2948,48 @@ impl ActionDb {
     }
 }
 
-fn set_prop_range<T: Copy + Into<serde_json::Number>>(
-    schema: &mut schemars::Schema,
-    name: impl AsRef<str>,
+fn prop(schema: &mut schemars::Schema, name: impl AsRef<str>) -> &mut serde_json::Value {
+    schema
+        .as_object_mut()
+        .unwrap()
+        .get_mut("properties")
+        .unwrap()
+        .get_mut(name.as_ref())
+        .unwrap()
+}
+
+/*fn set_range<T: Copy + Into<serde_json::Number>>(
+    schema: &mut serde_json::Value,
     range: std::ops::RangeInclusive<T>,
 ) {
     let min: serde_json::Number = (*range.start()).into();
     let max: serde_json::Number = (*range.end()).into();
-    let prop = schema
+    schema
         .as_object_mut()
         .unwrap()
-        .get_mut("properties")
-        .unwrap()
-        .get_mut(name.as_ref())
-        .unwrap()
+        .insert("minimum".to_owned(), min.into());
+    schema
         .as_object_mut()
-        .unwrap();
-    prop.insert("minimum".to_owned(), min.into());
-    prop.insert("maximum".to_owned(), max.into());
-}
+        .unwrap()
+        .insert("maximum".to_owned(), max.into());
+}*/
 
-fn set_prop_enum(
-    schema: &mut schemars::Schema,
-    name: impl AsRef<str>,
-    keep: impl FnMut(&mut serde_json::Value) -> bool,
-) {
-    let prop = schema
+fn set_enum(schema: &mut serde_json::Value, keep: impl FnMut(&mut serde_json::Value) -> bool) {
+    schema
         .as_object_mut()
         .unwrap()
-        .get_mut("properties")
-        .unwrap()
-        .get_mut(name.as_ref())
-        .unwrap()
-        .as_object_mut()
-        .unwrap();
-    prop.get_mut("enum")
+        .get_mut("enum")
         .unwrap()
         .as_array_mut()
         .unwrap()
         .retain_mut(keep);
+}
+
+fn add_enum(schema: &mut serde_json::Value, vals: Vec<serde_json::Value>) {
+    schema
+        .as_object_mut()
+        .unwrap()
+        .insert("enum".to_owned(), serde_json::Value::Array(vals));
 }
 
 fn available_actions(app: &CApp) -> ActionDb {
@@ -2695,11 +3020,19 @@ fn available_actions(app: &CApp) -> ActionDb {
             // TODO: (?) difficulty selection actions, enable advanced edition action
             ret.add::<actions::RenameCrew>();
             let mut meta = meta::<actions::RenameCrew>();
-            set_prop_range(
-                &mut meta.schema,
-                "crewMemberIndex",
-                1..=s.v_crew_boxes.len(),
-            );
+            let names = IdMap::with(|map| {
+                s.v_crew_boxes
+                    .iter()
+                    .filter_map(|x| {
+                        unsafe { xc(*x).unwrap() }.base.base.item.crew().map(|x| {
+                            serde_json::Value::String(
+                                map.map(x.blueprint.crew_name_long.to_str()).into_owned(),
+                            )
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            });
+            add_enum(prop(&mut meta.schema, "oldName"), names);
             ret.actions.insert(actions::RenameCrew::name(), meta);
             ret.add::<actions::RenameShip>();
             ret.add::<actions::StartGame>();
@@ -2778,7 +3111,7 @@ fn available_actions(app: &CApp) -> ActionDb {
             let sec = s.current_sector().unwrap();
             let secs: HashSet<_> = sec.neighbors().into_keys().map(|x| x.to_str()).collect();
             let mut meta = meta::<actions::ChooseNextSector>();
-            set_prop_enum(&mut meta.schema, "direction", |x| {
+            set_enum(prop(&mut meta.schema, "direction"), |x| {
                 secs.contains(x.as_str().unwrap())
             });
             ret.actions.insert(actions::ChooseNextSector::name(), meta);
@@ -2788,7 +3121,7 @@ fn available_actions(app: &CApp) -> ActionDb {
             let loc = s.current_loc().unwrap();
             let locs: HashSet<_> = loc.neighbors().into_keys().map(|x| x.to_str()).collect();
             let mut meta = meta::<actions::Jump>();
-            set_prop_enum(&mut meta.schema, "direction", |x| {
+            set_enum(prop(&mut meta.schema, "direction"), |x| {
                 locs.contains(x.as_str().unwrap())
             });
             ret.actions.insert(actions::Jump::name(), meta);
@@ -2802,21 +3135,20 @@ fn available_actions(app: &CApp) -> ActionDb {
         let c = &gui.choice_box;
         for (i, choice) in c.choices.iter().enumerate() {
             let (name, mut meta) = match i {
-                0 => (actions::Choose0::name(), meta::<actions::Choose0>()),
-                1 => (actions::Choose1::name(), meta::<actions::Choose1>()),
-                2 => (actions::Choose2::name(), meta::<actions::Choose2>()),
-                3 => (actions::Choose3::name(), meta::<actions::Choose3>()),
-                4 => (actions::Choose4::name(), meta::<actions::Choose4>()),
-                5 => (actions::Choose5::name(), meta::<actions::Choose5>()),
-                6 => (actions::Choose6::name(), meta::<actions::Choose6>()),
-                7 => (actions::Choose7::name(), meta::<actions::Choose7>()),
-                8 => (actions::Choose8::name(), meta::<actions::Choose8>()),
-                9 => (actions::Choose9::name(), meta::<actions::Choose9>()),
+                0 => (actions::Choose1::name(), meta::<actions::Choose1>()),
+                1 => (actions::Choose2::name(), meta::<actions::Choose2>()),
+                2 => (actions::Choose3::name(), meta::<actions::Choose3>()),
+                3 => (actions::Choose4::name(), meta::<actions::Choose4>()),
+                4 => (actions::Choose5::name(), meta::<actions::Choose5>()),
+                5 => (actions::Choose6::name(), meta::<actions::Choose6>()),
+                6 => (actions::Choose7::name(), meta::<actions::Choose7>()),
+                7 => (actions::Choose8::name(), meta::<actions::Choose8>()),
+                8 => (actions::Choose9::name(), meta::<actions::Choose9>()),
                 _ => panic!(),
             };
             meta.description = format!(
                 "Event option {}{}\n\n{}{}",
-                i,
+                i + 1,
                 match choice.type_ {
                     1 => " (Requirements not met, cannot be chosen)",
                     2 => " (Requirements met)",
@@ -2860,58 +3192,127 @@ fn available_actions(app: &CApp) -> ActionDb {
                 ret.add::<actions::SwitchStorePage>();
             }
             ret.add::<actions::SellScreen>();
-            fn meta_for<T: bindings::StoreBoxTrait, Y: Action>(
-                ret: &mut ActionDb,
-                store: &bindings::Store,
-            ) {
-                let mut meta = meta::<Y>();
-                let boxes = store.active_boxes::<T>();
-                if boxes.is_empty() {
-                    return;
-                }
-                let obj = meta.schema.get("properties").unwrap().as_object().unwrap();
-                let has_index = obj.contains_key("index");
-                let has_item = obj.contains_key("item");
-                let has_system = obj.contains_key("system");
-                if has_index {
-                    set_prop_range(&mut meta.schema, "index", 1..=boxes.len());
-                } else if has_item {
-                    let items: HashSet<_> = boxes
-                        .iter()
-                        .map(|x| x.cast::<bindings::ItemStoreBox>())
-                        .map(|x| unsafe { xc(x).unwrap() })
-                        .map(|x| {
-                            [ItemType::Missiles, ItemType::Fuel, ItemType::DroneParts]
-                                [x.blueprint().unwrap().base.type_ as usize]
-                        })
-                        .map(|x| x.to_str())
-                        .collect();
-                    set_prop_enum(&mut meta.schema, "item", |x| {
-                        items.contains(x.as_str().unwrap())
+            {
+                let mut meta = meta::<actions::BuyAugmentation>();
+                let boxes = store.active_boxes::<bindings::AugmentStoreBox>();
+                if !boxes.is_empty() {
+                    let augments: Vec<_> = IdMap::with(|map| {
+                        boxes
+                            .iter()
+                            .filter_map(|x| {
+                                unsafe { xc(*x).unwrap() }.blueprint().map(|x| {
+                                    serde_json::Value::String(
+                                        map.map(x.desc.title.to_str()).into_owned(),
+                                    )
+                                })
+                            })
+                            .collect()
                     });
-                } else if has_system {
-                    let systems: HashSet<_> = boxes
-                        .iter()
-                        .map(|x| x.cast::<bindings::SystemStoreBox>())
-                        .map(|x| unsafe { xc(x).unwrap() })
-                        .map(|x| {
-                            System::from_id(x.type_)
-                                .map(|x| x.to_string())
-                                .unwrap_or_default()
-                        })
-                        .collect();
-                    set_prop_enum(&mut meta.schema, "system", |x| {
-                        systems.contains(x.as_str().unwrap())
-                    });
-                } else {
-                    panic!()
+                    add_enum(prop(&mut meta.schema, "augmentName"), augments);
+                    ret.actions.insert(actions::BuyAugmentation::name(), meta);
                 }
-                ret.actions.insert(Y::name(), meta);
             }
-            meta_for::<bindings::AugmentStoreBox, actions::BuyAugmentation>(&mut ret, store);
-            meta_for::<bindings::SystemStoreBox, actions::BuySystem>(&mut ret, store);
-            meta_for::<bindings::WeaponStoreBox, actions::BuyWeapon>(&mut ret, store);
-            meta_for::<bindings::ItemStoreBox, actions::BuyConsumable>(&mut ret, store);
+            {
+                let mut meta = meta::<actions::BuySystem>();
+                let boxes = store.active_boxes::<bindings::SystemStoreBox>();
+                if !boxes.is_empty() {
+                    let systems: Vec<_> = IdMap::with(|map| {
+                        boxes
+                            .iter()
+                            .filter_map(|x| {
+                                unsafe { xc(*x).unwrap() }.blueprint().map(|x| {
+                                    serde_json::Value::String(
+                                        map.map(x.desc.title.to_str()).into_owned(),
+                                    )
+                                })
+                            })
+                            .collect()
+                    });
+                    add_enum(prop(&mut meta.schema, "systemName"), systems);
+                    ret.actions.insert(actions::BuySystem::name(), meta);
+                }
+            }
+            {
+                let mut meta = meta::<actions::BuyWeapon>();
+                let boxes = store.active_boxes::<bindings::WeaponStoreBox>();
+                if !boxes.is_empty() {
+                    let weapons: Vec<_> = IdMap::with(|map| {
+                        boxes
+                            .iter()
+                            .filter_map(|x| {
+                                unsafe { xc(*x).unwrap() }.blueprint().map(|x| {
+                                    serde_json::Value::String(
+                                        map.map(x.desc.title.to_str()).into_owned(),
+                                    )
+                                })
+                            })
+                            .collect()
+                    });
+                    add_enum(prop(&mut meta.schema, "weaponName"), weapons);
+                    ret.actions.insert(actions::BuyWeapon::name(), meta);
+                }
+            }
+            {
+                let mut meta = meta::<actions::BuyDrone>();
+                let boxes = store.active_boxes::<bindings::DroneStoreBox>();
+                if !boxes.is_empty() {
+                    let drones: Vec<_> = IdMap::with(|map| {
+                        boxes
+                            .iter()
+                            .filter_map(|x| {
+                                unsafe { xc(*x).unwrap() }.blueprint().map(|x| {
+                                    serde_json::Value::String(
+                                        map.map(x.desc.title.to_str()).into_owned(),
+                                    )
+                                })
+                            })
+                            .collect()
+                    });
+                    add_enum(prop(&mut meta.schema, "droneName"), drones);
+                    ret.actions.insert(actions::BuyDrone::name(), meta);
+                }
+            }
+            {
+                let mut meta = meta::<actions::BuyCrew>();
+                let boxes = store.active_boxes::<bindings::CrewStoreBox>();
+                if !boxes.is_empty() {
+                    let crew: Vec<_> = IdMap::with(|map| {
+                        boxes
+                            .iter()
+                            .map(|x| {
+                                serde_json::Value::String(
+                                    map.map(
+                                        unsafe { xc(*x).unwrap() }.blueprint().desc.title.to_str(),
+                                    )
+                                    .into_owned(),
+                                )
+                            })
+                            .collect()
+                    });
+                    add_enum(prop(&mut meta.schema, "crewMemberName"), crew);
+                    ret.actions.insert(actions::BuyCrew::name(), meta);
+                }
+            }
+            {
+                let mut meta = meta::<actions::BuyConsumable>();
+                let boxes = store.active_boxes::<bindings::ItemStoreBox>();
+                if !boxes.is_empty() {
+                    let weapons: Vec<_> = IdMap::with(|map| {
+                        boxes
+                            .iter()
+                            .filter_map(|x| {
+                                unsafe { xc(*x).unwrap() }.blueprint().map(|x| {
+                                    serde_json::Value::String(
+                                        map.map(x.base.desc.title.to_str()).into_owned(),
+                                    )
+                                })
+                            })
+                            .collect()
+                    });
+                    add_enum(prop(&mut meta.schema, "itemName"), weapons);
+                    ret.actions.insert(actions::BuyWeapon::name(), meta);
+                }
+            }
             let boxes = store.active_boxes::<bindings::RepairStoreBox>();
             let hull = gui.ship_manager().unwrap().ship.hull_integrity;
             if !boxes.is_empty() && hull.first < hull.second {
@@ -2937,46 +3338,53 @@ fn available_actions(app: &CApp) -> ActionDb {
                 ));
                 return ret;
             }
-            let crew_count = gui
-                .crew_screen
-                .crew_boxes
-                .iter()
-                .filter(|x| !unsafe { xc(**x).unwrap() }.base.item.is_empty())
-                .count();
-            for (name, mut meta) in [
-                (actions::RenameCrew::name(), meta::<actions::RenameCrew>()),
-                (actions::FireCrew::name(), meta::<actions::FireCrew>()),
-            ] {
-                set_prop_range(&mut meta.schema, "crewMemberIndex", 1..=crew_count);
-                ret.actions.insert(name, meta);
-            }
+            let names = IdMap::with(|map| {
+                app.gui()
+                    .unwrap()
+                    .ship_manager()
+                    .unwrap()
+                    .v_crew_list
+                    .iter()
+                    .map(|x| {
+                        serde_json::Value::String(
+                            map.map(unsafe { xc(*x).unwrap() }.blueprint.crew_name_long.to_str())
+                                .into_owned(),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            });
+            let mut m = meta::<actions::RenameCrew>();
+            add_enum(prop(&mut m.schema, "oldName"), names.clone());
+            ret.actions.insert(actions::RenameCrew::name(), m);
+            let mut m = meta::<actions::FireCrew>();
+            add_enum(prop(&mut m.schema, "name"), names);
+            ret.actions.insert(actions::FireCrew::name(), m);
         }
         if gui.equip_screen.base.b_open {
             ret.add::<actions::SwapInventorySlots>();
         }
         if gui.upgrade_screen.base.b_open {
-            let mut systems = BTreeSet::new();
+            let mut systems = Vec::new();
             if gui.upgrade_screen.reactor_button.base.base.b_active {
-                systems.insert(System::Reactor.to_string());
+                systems.push(serde_json::Value::String("reactor".to_owned()));
             }
-            for b in gui
-                .upgrade_screen
-                .v_upgrade_boxes
-                .iter()
-                .map(|x| unsafe { xc(*x).unwrap() })
-            {
-                let Some(bp) = b.blueprint() else {
-                    continue;
-                };
-                let Some(sys) = System::from_name(bp.name.to_str().as_ref()) else {
-                    continue;
-                };
-                systems.insert(sys.to_string());
-            }
-            let mut meta = meta::<actions::UpgradeSystem>();
-            set_prop_enum(&mut meta.schema, "system", |x| {
-                systems.contains(x.as_str().unwrap())
+            IdMap::with(|map| {
+                for b in gui
+                    .upgrade_screen
+                    .v_upgrade_boxes
+                    .iter()
+                    .map(|x| unsafe { xc(*x).unwrap() })
+                {
+                    let Some(bp) = b.blueprint() else {
+                        continue;
+                    };
+                    systems.push(serde_json::Value::String(
+                        map.map(bp.name.to_str()).into_owned(),
+                    ));
+                }
             });
+            let mut meta = meta::<actions::UpgradeSystem>();
+            add_enum(prop(&mut meta.schema, "system"), systems);
             ret.actions.insert(actions::UpgradeSystem::name(), meta);
             if gui.upgrade_screen.undo_button.base.b_active {
                 ret.add::<actions::UndoUpgrades>();
@@ -3021,13 +3429,14 @@ fn available_actions(app: &CApp) -> ActionDb {
     // if gui.crew_control.save_stations.base.b_active {}
     // load crew positions button
     // if gui.crew_control.return_stations.base.b_active {}
-    let systems: HashMap<String, System> = gui
-        .ship_manager()
-        .unwrap()
-        .systems()
-        .flat_map(|x| System::from_id(x.i_system_type))
-        .map(|x| (x.to_string(), x))
-        .collect();
+    let systems: HashMap<_, _> = IdMap::with(|map| {
+        gui.ship_manager()
+            .unwrap()
+            .systems()
+            .flat_map(|x| System::from_id(x.i_system_type))
+            .map(|x| (map.map(x.name().into()), x))
+            .collect()
+    });
 
     // i can make it reregister the available systems per each action to only list the systems that
     // can currently be increased/decreased, but honestly whatever, i'd assume that reregistering
@@ -3042,19 +3451,40 @@ fn available_actions(app: &CApp) -> ActionDb {
             meta::<actions::DecreasePower>(),
         ),
     ] {
-        set_prop_enum(&mut meta.schema, "system", |x| {
-            systems.get(x.as_str().unwrap()).is_some_and(|s| {
-                gui.sys_control
-                    .ship_manager()
-                    .unwrap()
-                    .system(*s)
-                    .is_some_and(|x| x.b_needs_power)
-            })
-        });
+        add_enum(
+            prop(&mut meta.schema, "system"),
+            systems
+                .iter()
+                .filter(|(_, v)| {
+                    gui.sys_control
+                        .ship_manager()
+                        .unwrap()
+                        .system(**v)
+                        .is_some_and(|x| x.b_needs_power)
+                })
+                .map(|(k, _)| serde_json::Value::String(k.clone().into_owned()))
+                .collect(),
+        );
         ret.actions.insert(name, meta);
     }
-    if let Some(sys) = gui.ship_manager().unwrap().weapon_system() {
-        let count = sys.slot_count;
+    if gui.ship_manager().unwrap().weapon_system().is_some() {
+        let cc = &gui.combat_control;
+        let weapons: Vec<_> = IdMap::with(|map| {
+            cc.weap_control
+                .base
+                .boxes
+                .iter()
+                .map(|x| x.cast::<bindings::WeaponBox>())
+                .map(|x| unsafe { xc(x).unwrap() })
+                .filter_map(|x| {
+                    x.weapon().and_then(|x| {
+                        x.blueprint().map(|x| {
+                            serde_json::Value::String(map.map(x.desc.title.to_str()).into_owned())
+                        })
+                    })
+                })
+                .collect()
+        });
         for (name, mut meta) in [
             (
                 actions::ActivateWeapon::name(),
@@ -3069,12 +3499,28 @@ fn available_actions(app: &CApp) -> ActionDb {
                 meta::<actions::SetWeaponTargets>(),
             ),
         ] {
-            set_prop_range(&mut meta.schema, "weaponIndex", 1..=count);
+            add_enum(prop(&mut meta.schema, "weaponName"), weapons.clone());
             ret.actions.insert(name, meta);
         }
     }
-    if let Some(sys) = gui.ship_manager().unwrap().drone_system() {
-        let count = sys.slot_count;
+    if gui.ship_manager().unwrap().drone_system().is_some() {
+        let cc = &gui.combat_control;
+        let drones: Vec<_> = IdMap::with(|map| {
+            cc.drone_control
+                .base
+                .boxes
+                .iter()
+                .map(|x| x.cast::<bindings::DroneBox>())
+                .map(|x| unsafe { xc(x).unwrap() })
+                .filter_map(|x| {
+                    x.drone().and_then(|x| {
+                        x.blueprint().map(|x| {
+                            serde_json::Value::String(map.map(x.desc.title.to_str()).into_owned())
+                        })
+                    })
+                })
+                .collect()
+        });
         for (name, mut meta) in [
             (
                 actions::ActivateDrone::name(),
@@ -3085,13 +3531,30 @@ fn available_actions(app: &CApp) -> ActionDb {
                 meta::<actions::DeactivateDrone>(),
             ),
         ] {
-            set_prop_range(&mut meta.schema, "droneIndex", 1..=count);
+            add_enum(prop(&mut meta.schema, "droneName"), drones.clone());
             ret.actions.insert(name, meta);
         }
     }
     if let Some(sys) = gui.ship_manager().unwrap().hacking_system() {
         if !sys.b_hacking {
-            ret.add::<actions::HackSystem>();
+            if let Some(target) = gui.combat_control.current_target() {
+                let mut meta = meta::<actions::HackSystem>();
+                let systems = IdMap::with(|map| {
+                    target
+                        .ship_manager()
+                        .unwrap()
+                        .systems()
+                        .map(|x| {
+                            serde_json::Value::String(
+                                map.map(System::from_id(x.i_system_type).unwrap().name().into())
+                                    .into_owned(),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                });
+                add_enum(prop(&mut meta.schema, "system"), systems);
+                ret.actions.insert(actions::HackSystem::name(), meta);
+            }
         } else if sys.base.i_lock_count == 0 {
             ret.add::<actions::ActivateHacking>();
         }
@@ -3124,7 +3587,31 @@ fn available_actions(app: &CApp) -> ActionDb {
             ret.add::<actions::PlanDoorRoute>();
         }
     }
-    ret.add::<actions::MoveCrew>();
+    let mut meta = meta::<actions::MoveCrew>();
+    let names = IdMap::with(|map| {
+        app.gui()
+            .unwrap()
+            .ship_manager()
+            .unwrap()
+            .v_crew_list
+            .iter()
+            .map(|x| {
+                serde_json::Value::String(
+                    map.map(unsafe { xc(*x).unwrap() }.blueprint.crew_name_long.to_str())
+                        .into_owned(),
+                )
+            })
+            .collect::<Vec<_>>()
+    });
+    add_enum(
+        prop(&mut meta.schema, "crewMemberNames")
+            .as_object_mut()
+            .unwrap()
+            .get_mut("items")
+            .unwrap(),
+        names,
+    );
+    ret.actions.insert(actions::MoveCrew::name(), meta);
     // gui.sys_control.sys_boxes - iterate to get all the systems
     // 14 MindBox
     // 13 CloneBox
