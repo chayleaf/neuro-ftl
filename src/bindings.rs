@@ -119,7 +119,15 @@ impl System {
             _ => return None,
         })
     }
-    pub fn from_name(name: &str) -> Option<Self> {
+    pub fn blueprint(&self) -> Option<&'static crate::xml::SystemBlueprint> {
+        super::library().blueprints.get(self.name()).map(|x| {
+            let crate::Blueprint::System(x) = x else {
+                panic!();
+            };
+            x
+        })
+    }
+    /*pub fn from_name(name: &str) -> Option<Self> {
         Some(match name {
             "shields" => Self::Shields,
             "engines" => Self::Engines,
@@ -140,8 +148,8 @@ impl System {
             "reactor" => Self::Reactor,
             _ => return None,
         })
-    }
-    pub fn name(&self) -> &'static str {
+    }*/
+    fn name(&self) -> &'static str {
         match self {
             Self::Shields => "shields",
             Self::Engines => "engines",
@@ -165,11 +173,11 @@ impl System {
     }
 }
 
-impl fmt::Display for System {
+/*impl fmt::Display for System {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.name())
     }
-}
+}*/
 
 #[repr(u32)]
 pub enum TextEvent {

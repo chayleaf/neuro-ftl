@@ -22,10 +22,11 @@ pub struct PlayerShipInfo {
     pub scrap_count: Help<i32>,
 }
 
-#[derive(Clone, Debug, Serialize, Delta)]
+#[derive(Clone, Debug, Serialize, Delta, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct WeaponInfo {
     #[serde(skip_serializing_if = "String::is_empty")]
+    #[delta1]
     pub name: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub description: String,
@@ -83,6 +84,7 @@ pub struct WeaponInfo {
 #[serde(rename_all = "camelCase")]
 pub struct DroneInfo {
     #[serde(skip_serializing_if = "String::is_empty")]
+    #[delta1]
     pub name: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub description: String,
@@ -92,12 +94,54 @@ pub struct DroneInfo {
     pub tip: String,
     #[serde(skip_serializing_if = "is_zero_u8")]
     pub required_power: u8,
+    #[serde(skip_serializing_if = "is_false")]
+    pub deploying: bool,
     pub deployed: bool,
     pub powered: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub hacked: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub dead: bool,
+    pub health: QuantizedU8<20>,
+    pub max_health: QuantizedU8<20>,
+    // for crew
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<Location>,
+}
+
+#[derive(Clone, Debug, Serialize, Delta)]
+#[serde(rename_all = "snake_case")]
+pub struct AugmentInfo {
+    #[serde(skip_serializing_if = "String::is_empty")]
+    #[delta1]
+    pub name: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub tooltip: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub tip: String,
+}
+
+#[derive(Clone, Debug, Serialize, Delta)]
+#[serde(rename_all = "snake_case")]
+pub struct ItemInfo {
+    #[serde(skip_serializing_if = "String::is_empty")]
+    #[delta1]
+    pub name: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub description: String,
+}
+
+// "repair_{one,all}_*"
+#[derive(Clone, Debug, Serialize, Delta)]
+#[serde(rename_all = "snake_case")]
+pub struct RepairInfo {
+    #[serde(skip_serializing_if = "String::is_empty")]
+    #[delta1]
+    pub name: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub description: String,
 }
 
 #[derive(Clone, Debug, Serialize, Delta)]
@@ -115,6 +159,7 @@ pub struct SystemLevel {
 #[derive(Clone, Debug, Serialize, Delta)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemInfo {
+    #[delta1]
     pub ship: ShipId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub room_id: Option<u8>,
@@ -148,6 +193,55 @@ pub struct SystemInfo {
     pub being_damaged: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub being_repaired: bool,
+    // for piloting
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_evasion_chance_percentage: Option<u8>,
+    // for weapons
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub weapon_names: Vec<String>,
+    // for drones
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub drone_names: Vec<String>,
+    // for shields
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shields: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_shields: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub super_shields: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_super_shields: Option<u8>,
+    // for hacking
+    #[serde(skip_serializing_if = "is_false")]
+    pub hacking_in_progress: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub hacking_allowed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hacking_drone_system: Option<String>,
+    // for battery
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub battery_power: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_battery_power: Option<u8>,
+    // for oxygen
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ship_oxygen_level: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ship_max_oxygen_level: Option<u8>,
+    // for artillery
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artillery_weapon: Option<WeaponInfo>,
+}
+
+#[derive(Clone, Debug, Serialize, Delta)]
+#[serde(rename_all = "snake_case")]
+pub struct StoreItem {
+    pub drones: Vec<DroneInfo>,
+    pub weapons: Vec<WeaponInfo>,
+    pub crew: Vec<CrewInfo>,
+    pub augments: Vec<AugmentInfo>,
+    pub items: Vec<ItemInfo>,
+    pub repair: Vec<RepairInfo>,
 }
 
 #[derive(Clone, Debug, Serialize, Delta, Ord, PartialOrd, Eq, PartialEq)]
@@ -200,7 +294,7 @@ pub enum Species {
     Anaerobic,
 }
 
-#[derive(Clone, Debug, Serialize, Delta)]
+#[derive(Clone, Debug, Serialize, Delta, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Location {
     pub ship: ShipId,
@@ -240,11 +334,9 @@ pub struct CrewInfo {
     pub faction: ShipId,
     pub location: Location,
     pub bonus_percentage_added: Skills,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub drone_id: Option<u8>,
     pub health: QuantizedU8<20>,
-    // base max health being 5 (sounds like reasonable enough quantization)
     pub max_health: QuantizedU8<20>,
+    pub is_drone: bool,
     // reuse on_fire for this because who cares
     #[serde(skip_serializing_if = "is_false")]
     pub fighting_fire: bool,
@@ -275,6 +367,8 @@ struct ShipInfo {
     pub doors: Vec<DoorInfo>,
     pub systems: Vec<SystemInfo>,
     pub crew: Vec<CrewInfo>,
+    pub weapons: Vec<WeaponInfo>,
+    pub drones: Vec<WeaponInfo>,
 }
 
 impl PlayerShipInfo {

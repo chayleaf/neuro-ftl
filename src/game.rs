@@ -40,7 +40,10 @@ struct State {
 unsafe impl Sync for State {}
 unsafe impl Send for State {}
 
-fn resource_event_str(res: &bindings::ResourceEvent) -> String {
+fn resource_event_str(
+    res: &bindings::ResourceEvent,
+    ship_manager: &bindings::ShipManager,
+) -> String {
     let mut ret = Vec::new();
     if res.fuel > 0 {
         ret.push(format!("will get {} fuel", res.fuel));
@@ -124,14 +127,14 @@ fn resource_event_str(res: &bindings::ResourceEvent) -> String {
         ));
     }
     if let Some(upgrade_id) = System::from_id(res.upgrade_id) {
-        let upgrade_id = upgrade_id.to_string();
-        let upgrade_id = super::library().text(&upgrade_id).unwrap_or(&upgrade_id);
-        ret.push(format!("{upgrade_id} system will be upgraded"));
+        if ship_manager.system(upgrade_id).is_some() {
+            let bp = upgrade_id.blueprint().unwrap();
+            ret.push(format!("{} will be upgraded", bp.title.to_str()));
+        }
     }
     if let Some(system_id) = System::from_id(res.system_id) {
-        let system_id = system_id.to_string();
-        let system_id = super::library().text(&system_id).unwrap_or(&system_id);
-        ret.push(format!("{system_id} system will be installed"));
+        let bp = system_id.blueprint().unwrap();
+        ret.push(format!("{} will be installed", bp.title.to_str()));
     }
     let ret = ret.join(", ");
     if !ret.is_empty() {
@@ -688,7 +691,8 @@ impl neuro_sama::game::GameMut for State {
                                         .choices
                                         .get(index)
                                         .unwrap()
-                                        .rewards
+                                        .rewards,
+                                    app.gui().unwrap().ship_manager().unwrap()
                                 )
                             ))
                             .into())
@@ -721,8 +725,15 @@ impl neuro_sama::game::GameMut for State {
                             .unwrap()
                             .systems_mut()
                             .find(|x| {
-                                map.map(System::from_id(x.i_system_type).unwrap().name().into())
-                                    == system
+                                map.map(
+                                    System::from_id(x.i_system_type)
+                                        .unwrap()
+                                        .blueprint()
+                                        .unwrap()
+                                        .title
+                                        .to_str()
+                                        .into(),
+                                ) == system
                             })
                     });
                     if let Some(system) = system {
@@ -795,8 +806,9 @@ impl neuro_sama::game::GameMut for State {
                                 .unwrap()
                                 .systems()
                                 .filter_map(|x| {
-                                    System::from_id(x.i_system_type)
-                                        .map(|x| map.map(x.name().into()))
+                                    System::from_id(x.i_system_type).map(|x| {
+                                        map.map(x.blueprint().unwrap().title.to_str().into())
+                                    })
                                 })
                                 .collect::<Vec<_>>()
                         });
@@ -1192,8 +1204,15 @@ impl neuro_sama::game::GameMut for State {
                         let target = target.ship_manager_mut().unwrap();
                         let system = IdMap::with(|map| {
                             target.systems_mut().find(|x| {
-                                map.map(System::from_id(x.i_system_type).unwrap().name().into())
-                                    == event.system
+                                map.map(
+                                    System::from_id(x.i_system_type)
+                                        .unwrap()
+                                        .blueprint()
+                                        .unwrap()
+                                        .title
+                                        .to_str()
+                                        .into(),
+                                ) == event.system
                             })
                         });
                         if let Some(system) = system {
@@ -1249,7 +1268,13 @@ impl neuro_sama::game::GameMut for State {
                                     .systems()
                                     .map(|x| {
                                         map.map(
-                                            System::from_id(x.i_system_type).unwrap().name().into(),
+                                            System::from_id(x.i_system_type)
+                                                .unwrap()
+                                                .blueprint()
+                                                .unwrap()
+                                                .title
+                                                .to_str()
+                                                .into(),
                                         )
                                     })
                                     .collect::<Vec<_>>()
@@ -2171,8 +2196,10 @@ impl neuro_sama::game::GameMut for State {
                         let c = IdMap::with(|map| {
                             upgrades.v_upgrade_boxes.iter().copied().find(|x| {
                                 unsafe { xc(*x).unwrap() }.system().is_some_and(|x| {
-                                    System::from_id(x.i_system_type)
-                                        .is_some_and(|x| map.map(x.name().into()) == system)
+                                    System::from_id(x.i_system_type).is_some_and(|x| {
+                                        map.map(x.blueprint().unwrap().title.to_str().into())
+                                            == system
+                                    })
                                 })
                             })
                         });
@@ -3155,13 +3182,15 @@ fn available_actions(app: &CApp) -> ActionDb {
                     _ => " (No requirements)",
                 },
                 choice.text.to_str(),
-                resource_event_str(&choice.rewards)
+                resource_event_str(&choice.rewards, gui.ship_manager().unwrap())
             )
             .into();
             ret.actions.insert(name, meta);
         }
         ret.action_context = Some((
-            "Current event:\n".to_owned() + &c.main_text.to_str() + &resource_event_str(&c.rewards),
+            "Current event:\n".to_owned()
+                + &c.main_text.to_str()
+                + &resource_event_str(&c.rewards, gui.ship_manager().unwrap()),
             false,
         ));
         ret.force = Some(Force::new(
@@ -3434,7 +3463,7 @@ fn available_actions(app: &CApp) -> ActionDb {
             .unwrap()
             .systems()
             .flat_map(|x| System::from_id(x.i_system_type))
-            .map(|x| (map.map(x.name().into()), x))
+            .map(|x| (map.map(x.blueprint().unwrap().title.to_str().into()), x))
             .collect()
     });
 
@@ -3546,8 +3575,16 @@ fn available_actions(app: &CApp) -> ActionDb {
                         .systems()
                         .map(|x| {
                             serde_json::Value::String(
-                                map.map(System::from_id(x.i_system_type).unwrap().name().into())
-                                    .into_owned(),
+                                map.map(
+                                    System::from_id(x.i_system_type)
+                                        .unwrap()
+                                        .blueprint()
+                                        .unwrap()
+                                        .title
+                                        .to_str()
+                                        .into(),
+                                )
+                                .into_owned(),
                             )
                         })
                         .collect::<Vec<_>>()

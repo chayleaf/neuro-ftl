@@ -27,6 +27,16 @@ pub struct TextString {
     pub back: Option<String>,
 }
 
+impl TextString {
+    pub fn to_str(&'static self) -> &'static str {
+        if let Some(id) = &self.load {
+            super::library().text(id).unwrap()
+        } else {
+            self.contents.as_ref().unwrap()
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug, Hash, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Achievement {
