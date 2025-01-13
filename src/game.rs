@@ -3855,7 +3855,7 @@ fn available_actions(app: &CApp) -> ActionDb {
                     ),
             ) {
                 let mut m = meta::<actions::CloseDoors>();
-                set_range(array_item(prop(&mut m.schema, "doorIds")), 0..=*range.end());
+                set_range(array_item(prop(&mut m.schema, "doorIds")), range.clone());
                 ret.actions.insert(actions::CloseDoors::name(), m);
                 let mut m = meta::<actions::OpenDoors>();
                 set_range(array_item(prop(&mut m.schema, "doorIds")), range);

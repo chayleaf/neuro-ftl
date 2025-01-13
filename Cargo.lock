@@ -513,9 +513,9 @@ dependencies = [
 
 [[package]]
 name = "neuro-sama"
-version = "0.5.0-alpha.1"
+version = "0.5.0-alpha.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f25b5160172d17725ab120c8cd4053ee7d1ca7e87a6ed9ea7f2c2896fbc5974"
+checksum = "0d3ecfec27a5c5f244e04e68217537f685b925714f798db3223b2199ee105974"
 dependencies = [
  "json5",
  "neuro-sama-derive",
