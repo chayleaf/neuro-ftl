@@ -5169,6 +5169,33 @@ pub struct CrewDrone {
 
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
+pub struct RepairDrone {
+    pub base: CrewDrone,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct BattleDrone {
+    pub base: CrewDrone,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct BoarderDrone {
+    pub base: CrewDrone,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct IonDrone {
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
+    pub base: BoarderDrone,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x920)]
+    pub last_room: c_int,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
 pub struct CollisionResponse {
     // 1: hit (but don't damage anymore), 2: shield, 3: miss
     // 0: proper hit (caller should also do some damage)
@@ -5291,6 +5318,103 @@ pub struct SpaceDrone {
     pub beam_speed: c_float,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x280)]
     pub hack_sparks: Animation,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct BoarderPodDrone {
+    pub base: SpaceDrone,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x340)]
+    base_sheet: *mut GL_Texture,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x348)]
+    color_sheet: *mut GL_Texture,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x350)]
+    starting_position: Pointf,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x358)]
+    drone_image: Animation,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x418)]
+    flame: CachedImage,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x460)]
+    boarder_drone: *mut BoarderDrone,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x468)]
+    b_delivered_drone: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x469)]
+    died_in_space: bool,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct CombatDrone {
+    pub base: SpaceDrone,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x340)]
+    pub last_destination: Pointf,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x348)]
+    pub progress_to_destination: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x34c)]
+    pub heading: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x350)]
+    pub old_heading: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x358)]
+    pub drone_image_off: CachedImage,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x3a0)]
+    pub drone_image_charging: CachedImage,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x3e8)]
+    pub drone_image_on: CachedImage,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x430)]
+    pub engine_image: CachedImage,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct ShipRepairDrone {
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
+    pub base: CombatDrone,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x478)]
+    pub repair_beam: CachedImage,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x4c0)]
+    pub repair_beams: Vector<c_float>,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct DefenseDrone {
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
+    pub base: SpaceDrone,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x340)]
+    pub current_target_id: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x344)]
+    pub shot_at_target_id: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x348)]
+    pub current_speed: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x350)]
+    pub drone_image: CachedImage,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x398)]
+    pub gun_image_off: CachedImage,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x3e0)]
+    pub gun_image_charging: CachedImage,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x428)]
+    pub gun_image_on: CachedImage,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x470)]
+    pub engine_image: CachedImage,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x4b8)]
+    pub current_target_type: c_int,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct SuperShieldDrone {
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
+    pub base: DefenseDrone,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x4c0)]
+    pub shield_system: *mut Shields,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x4c8)]
+    pub drone_image_on: CachedImage,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x510)]
+    pub drone_image_off: CachedImage,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x558)]
+    pub drone_image_glow: CachedImage,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x5a0)]
+    pub glow_animation: c_float,
 }
 
 #[vtable]

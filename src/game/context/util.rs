@@ -20,7 +20,6 @@ macro_rules! impl_delta {
     };
 }
 
-#[macro_export]
 macro_rules! impl_delta1 {
     ($($t:tt),*) => {
         $(impl<'a, T: 'a + std::fmt::Debug + Serialize + Eq> Delta<'a> for $t <T> {
@@ -119,6 +118,13 @@ pub trait HasId<'a> {
     /// be implemented in this method, because it just makes sense, otherwise actions won't really
     /// be able to function properly I think.
     fn id(&'a self) -> Self::Id;
+}
+
+impl<'a> HasId<'a> for String {
+    type Id = &'a str;
+    fn id(&'a self) -> Self::Id {
+        self.as_str()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]

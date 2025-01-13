@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use neuro_ftl_derive::Delta;
 use serde::Serialize;
 
-use crate::{impl_delta, impl_delta1};
+use crate::impl_delta;
 
 use super::strings::{self, text};
 
@@ -25,8 +25,20 @@ pub struct PlayerShipInfo {
 #[derive(Clone, Debug, Serialize, Delta)]
 #[serde(rename_all = "camelCase")]
 pub struct WeaponInfo {
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub tooltip: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub tip: String,
     #[serde(skip_serializing_if = "is_zero_u8")]
     pub damage: u8,
+    #[serde(skip_serializing_if = "is_zero_u8")]
+    pub healing: u8,
+    #[serde(skip_serializing_if = "is_zero_u8")]
+    pub missiles_per_shot: u8,
     #[serde(skip_serializing_if = "is_zero_u8")]
     pub shield_piercing: u8,
     // *10
@@ -53,37 +65,51 @@ pub struct WeaponInfo {
     pub lockdowns_room: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub can_target_own_ship: bool,
-
-    #[serde(skip_serializing_if = "is_false")]
-    pub uses_missiles: bool,
     #[serde(skip_serializing_if = "is_zero_u8")]
-    pub required_power: u8,
+    pub missiles_required: u8,
+
+    #[serde(skip_serializing_if = "is_zero_u8")]
+    pub projectile_speed: u8,
     #[serde(skip_serializing_if = "is_zero_u8")]
     pub cooldown: u8,
     #[serde(skip_serializing_if = "is_zero_u8")]
-    pub healing: u8,
+    pub required_power: u8,
+    pub powered: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub hacked: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Delta)]
+#[serde(rename_all = "camelCase")]
+pub struct DroneInfo {
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub tooltip: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub tip: String,
     #[serde(skip_serializing_if = "is_zero_u8")]
-    pub bonus_hull_damage: u8,
-    #[serde(skip_serializing_if = "is_zero_u8")]
-    pub projectile_speed: u8,
+    pub required_power: u8,
+    pub deployed: bool,
+    pub powered: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub hacked: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub dead: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Delta)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemLevel {
     pub effect: Cow<'static, str>,
+    #[delta1]
     pub level: u8,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost: Option<u8>,
     pub purchased: bool,
     pub active: bool,
-}
-
-impl<'a> HasId<'a> for SystemLevel {
-    type Id = u8;
-    fn id(&'a self) -> Self::Id {
-        self.level
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Delta)]
@@ -92,6 +118,7 @@ pub struct SystemInfo {
     pub ship: ShipId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub room_id: Option<u8>,
+    #[delta1]
     pub name: Cow<'static, str>,
     pub description: Cow<'static, str>,
     pub hp: u8,
@@ -123,38 +150,20 @@ pub struct SystemInfo {
     pub being_repaired: bool,
 }
 
-impl<'a> HasId<'a> for SystemInfo {
-    type Id = Cow<'a, str>;
-    fn id(&'a self) -> Self::Id {
-        Cow::Borrowed(self.name.as_ref())
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Delta, Ord, PartialOrd, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DoorInfoShort {
+    #[delta1]
     pub door_id: i8,
+    #[delta1]
     pub room_id: i8,
-}
-
-impl<'a> HasId<'a> for DoorInfoShort {
-    type Id = &'a Self;
-    fn id(&'a self) -> Self::Id {
-        self
-    }
-}
-
-impl<'a> HasId<'a> for String {
-    type Id = &'a str;
-    fn id(&'a self) -> Self::Id {
-        self.as_str()
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Delta)]
 #[serde(rename_all = "camelCase")]
 pub struct RoomInfo {
     pub ship: ShipId,
+    #[delta1]
     pub room_id: i8,
     pub doors: Vec<DoorInfoShort>,
     pub crew_member_names: Vec<String>,
@@ -165,30 +174,17 @@ pub struct RoomInfo {
     pub hacked: bool,
 }
 
-impl<'a> HasId<'a> for RoomInfo {
-    type Id = i8;
-    fn id(&'a self) -> Self::Id {
-        self.room_id
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Delta)]
 #[serde(rename_all = "camelCase")]
 pub struct DoorInfo {
     pub ship: ShipId,
+    #[delta1]
     pub door_id: i8,
     pub room_id_1: i8,
     pub room_id_2: i8,
     pub open: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub hacked: bool,
-}
-
-impl<'a> HasId<'a> for DoorInfo {
-    type Id = i8;
-    fn id(&'a self) -> Self::Id {
-        self.door_id
-    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -238,6 +234,7 @@ impl Skills {
 #[derive(Clone, Debug, Serialize, Delta)]
 #[serde(rename_all = "camelCase")]
 pub struct CrewInfo {
+    #[delta1]
     pub name: String,
     pub species: Species,
     pub faction: ShipId,
@@ -269,13 +266,6 @@ pub struct CrewInfo {
     pub sabotaging: Option<Cow<'static, str>>,
 }
 
-impl<'a> HasId<'a> for CrewInfo {
-    type Id = &'a str;
-    fn id(&'a self) -> Self::Id {
-        self.name.as_str()
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Delta)]
 #[serde(rename_all = "camelCase")]
 struct ShipInfo {
@@ -285,11 +275,6 @@ struct ShipInfo {
     pub doors: Vec<DoorInfo>,
     pub systems: Vec<SystemInfo>,
     pub crew: Vec<CrewInfo>,
-}
-
-impl<'a> HasId<'a> for ShipInfo {
-    type Id = ();
-    fn id(&'a self) -> Self::Id {}
 }
 
 impl PlayerShipInfo {
@@ -311,17 +296,12 @@ pub struct Pair<T> {
     pub max: T,
 }
 
-#[derive(Copy, Clone, Debug, Default, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct Point<T> {
+#[derive(Copy, Clone, Debug, Default, Delta, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct Point<T: std::fmt::Debug + Ord + Serialize> {
+    #[delta1]
     pub x: T,
+    #[delta1]
     pub y: T,
-}
-
-impl<'a, T: 'a + Ord> HasId<'a> for Point<T> {
-    type Id = &'a Self;
-    fn id(&'a self) -> Self::Id {
-        self
-    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -510,4 +490,3 @@ pub struct SectorInfo {
 }
 
 impl_delta!(ShipId, Species);
-impl_delta1!(Point);
