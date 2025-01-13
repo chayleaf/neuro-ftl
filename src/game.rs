@@ -35,6 +35,7 @@ struct State {
     rx: mpsc::Receiver<Option<tungstenite::Message>>,
     app: *mut CApp,
     actions: ActionDb,
+    //buffer: context::Context,
 }
 
 unsafe impl Sync for State {}

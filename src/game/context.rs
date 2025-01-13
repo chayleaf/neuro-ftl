@@ -11,17 +11,6 @@ pub mod util;
 
 use util::*;
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PlayerShipInfo {
-    pub hull: Help<i32>,
-    pub max_hull: i32,
-    pub drone_count: Help<i32>,
-    pub fuel_count: Help<i32>,
-    pub missile_count: Help<i32>,
-    pub scrap_count: Help<i32>,
-}
-
 #[derive(Clone, Debug, Serialize, Delta, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct WeaponInfo {
@@ -80,7 +69,7 @@ pub struct WeaponInfo {
     pub hacked: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Delta)]
+#[derive(Clone, Debug, Serialize, Delta, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DroneInfo {
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -109,7 +98,7 @@ pub struct DroneInfo {
     pub location: Option<Location>,
 }
 
-#[derive(Clone, Debug, Serialize, Delta)]
+#[derive(Clone, Debug, Serialize, Delta, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct AugmentInfo {
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -144,7 +133,7 @@ pub struct RepairInfo {
     pub description: String,
 }
 
-#[derive(Clone, Debug, Serialize, Delta)]
+#[derive(Clone, Debug, Serialize, Delta, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemLevel {
     pub effect: Cow<'static, str>,
@@ -156,7 +145,7 @@ pub struct SystemLevel {
     pub active: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Delta)]
+#[derive(Clone, Debug, Serialize, Delta, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemInfo {
     #[delta1]
@@ -235,7 +224,7 @@ pub struct SystemInfo {
 
 #[derive(Clone, Debug, Serialize, Delta)]
 #[serde(rename_all = "snake_case")]
-pub struct StoreItem {
+pub struct StoreItems {
     pub drones: Vec<DroneInfo>,
     pub weapons: Vec<WeaponInfo>,
     pub crew: Vec<CrewInfo>,
@@ -253,7 +242,7 @@ pub struct DoorInfoShort {
     pub room_id: i8,
 }
 
-#[derive(Clone, Debug, Serialize, Delta)]
+#[derive(Clone, Debug, Serialize, Delta, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RoomInfo {
     pub ship: ShipId,
@@ -268,7 +257,7 @@ pub struct RoomInfo {
     pub hacked: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Delta)]
+#[derive(Clone, Debug, Serialize, Delta, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DoorInfo {
     pub ship: ShipId,
@@ -292,6 +281,8 @@ pub enum Species {
     Crystal,
     Energy,
     Anaerobic,
+    // not techically a species
+    Drone,
 }
 
 #[derive(Clone, Debug, Serialize, Delta, PartialEq, Eq)]
@@ -301,7 +292,7 @@ pub struct Location {
     pub room_id: u8,
 }
 
-#[derive(Clone, Debug, Serialize, Delta)]
+#[derive(Clone, Debug, Serialize, Delta, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Skills {
     pub piloting_evasion: Help<u8>,
@@ -325,18 +316,18 @@ impl Skills {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Delta)]
+#[derive(Clone, Debug, Serialize, Delta, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CrewInfo {
     #[delta1]
     pub name: String,
     pub species: Species,
     pub faction: ShipId,
-    pub location: Location,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<Location>,
     pub bonus_percentage_added: Skills,
     pub health: QuantizedU8<20>,
     pub max_health: QuantizedU8<20>,
-    pub is_drone: bool,
     // reuse on_fire for this because who cares
     #[serde(skip_serializing_if = "is_false")]
     pub fighting_fire: bool,
@@ -358,30 +349,120 @@ pub struct CrewInfo {
     pub sabotaging: Option<Cow<'static, str>>,
 }
 
-#[derive(Clone, Debug, Serialize, Delta)]
+#[derive(Clone, Debug, Serialize, Delta, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct ShipInfo {
+pub struct ShipInfo {
     pub ship_name: String,
     pub destroyed: bool,
     pub rooms: Vec<RoomInfo>,
     pub doors: Vec<DoorInfo>,
     pub systems: Vec<SystemInfo>,
     pub crew: Vec<CrewInfo>,
-    pub weapons: Vec<WeaponInfo>,
-    pub drones: Vec<WeaponInfo>,
+    pub weapons: Vec<Option<WeaponInfo>>,
+    pub drones: Vec<Option<WeaponInfo>>,
+    pub hull: Help<i32>,
+    pub max_hull: i32,
 }
 
-impl PlayerShipInfo {
+#[derive(Clone, Debug, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum AnyItemInfo {
+    Weapon(WeaponInfo),
+    Drone(DroneInfo),
+}
+
+impl<'a> HasId<'a> for AnyItemInfo {
+    type Id = (&'a String,);
+    fn id(&'a self) -> Self::Id {
+        match self {
+            Self::Weapon(x) => x.id(),
+            Self::Drone(x) => x.id(),
+        }
+    }
+}
+
+impl<'a> Delta<'a> for AnyItemInfo {
+    type Delta = &'a AnyItemInfo;
+    fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
+        (self != prev).then_some(self)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Delta)]
+#[serde(rename_all = "camelCase")]
+pub struct Inventory {
+    pub scrap_count: Help<i32>,
+    pub drone_count: Help<i32>,
+    pub fuel_count: Help<i32>,
+    pub missile_count: Help<i32>,
+    pub augments: Vec<ItemSlot<AugmentInfo>>,
+    #[serde(skip_serializing_if = "ItemSlot::is_empty")]
+    pub overcapacity_slot: ItemSlot<AnyItemInfo>,
+    #[serde(skip_serializing_if = "ItemSlot::is_empty")]
+    pub augment_overcapacity_slot: ItemSlot<AugmentInfo>,
+    pub cargo_slots: Vec<ItemSlot<AnyItemInfo>>,
+}
+
+#[derive(Clone, Debug, Serialize, Eq, PartialEq, Ord, PartialOrd)]
+#[serde(rename_all = "snake_case")]
+pub enum InventorySlotType {
+    OverCapacity,
+    AugmentationOverCapacity,
+    Weapon,
+    Cargo,
+    Drone,
+    Augmentation,
+}
+
+#[derive(Clone, Debug, Serialize, Delta, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemSlot<T: for<'a> Delta<'a, Delta: Clone> + Eq + Serialize + std::fmt::Debug> {
+    #[delta1]
+    pub r#type: InventorySlotType,
+    #[delta1]
+    pub index: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contents: Option<T>,
+}
+
+impl<T: for<'a> Delta<'a, Delta: Clone> + Eq + Serialize + std::fmt::Debug> ItemSlot<T> {
+    pub fn is_empty(&self) -> bool {
+        self.contents.is_none()
+    }
+}
+
+impl Inventory {
     pub fn new() -> Self {
         Self {
-            hull: Help::new(text("tooltip_hull"), 0),
-            max_hull: 0,
+            // hull: Help::new(text("tooltip_hull"), 0),
+            // max_hull: 0,
             drone_count: Help::new(text("tooltip_droneCount"), 0),
             fuel_count: Help::new(text("tooltip_fuelCount"), 0),
             missile_count: Help::new(text("tooltip_missileCount"), 0),
             scrap_count: Help::new(text("tooltip_scrapCount"), 0),
+            augments: vec![],
+            overcapacity_slot: ItemSlot {
+                r#type: InventorySlotType::OverCapacity,
+                index: 0,
+                contents: None,
+            },
+            augment_overcapacity_slot: ItemSlot {
+                r#type: InventorySlotType::AugmentationOverCapacity,
+                index: 0,
+                contents: None,
+            },
+            cargo_slots: vec![],
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize, Delta)]
+#[serde(rename_all = "camelCase")]
+pub struct Context {
+    pub inventory: Inventory,
+    pub player_ship: ShipInfo,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enemy_ship: Option<ShipInfo>,
 }
 
 #[derive(Copy, Clone, Debug, Default, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -583,4 +664,4 @@ pub struct SectorInfo {
     pub unknown: bool,
 }
 
-impl_delta!(ShipId, Species);
+impl_delta!(ShipId, Species, InventorySlotType);

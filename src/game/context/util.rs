@@ -20,20 +20,63 @@ macro_rules! impl_delta {
     };
 }
 
-macro_rules! impl_delta1 {
-    ($($t:tt),*) => {
-        $(impl<'a, T: 'a + std::fmt::Debug + Serialize + Eq> Delta<'a> for $t <T> {
-            type Delta = &'a Self;
-            fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
-                (self != prev).then_some(self)
-            }
-        })*
-    };
-}
-
 impl_delta!(u8, i8, u16, i16, u32, i32, u64, i64, usize, isize);
 impl_delta!((), bool, String);
-impl_delta1!(Option);
+
+#[derive(Eq, PartialEq)]
+pub enum DeltaOrT<'a, T: Delta<'a>> {
+    None,
+    Delta(T::Delta),
+    T(&'a T),
+}
+
+impl<'a, T: Delta<'a>> Clone for DeltaOrT<'a, T>
+where
+    T::Delta: Clone,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::None => Self::None,
+            Self::Delta(x) => Self::Delta(x.clone()),
+            Self::T(x) => Self::T(x),
+        }
+    }
+}
+
+impl<'a, T: std::fmt::Debug + Delta<'a>> std::fmt::Debug for DeltaOrT<'a, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => f.write_str("DeltaOrT::None"),
+            Self::Delta(x) => write!(f, "DeltaOrT::Delta({x:?})"),
+            Self::T(x) => write!(f, "DeltaOrT::T({x:?})"),
+        }
+    }
+}
+
+impl<'a, T: Delta<'a> + Serialize> Serialize for DeltaOrT<'a, T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::None => None::<()>.serialize(serializer),
+            Self::Delta(x) => x.serialize(serializer),
+            Self::T(x) => x.serialize(serializer),
+        }
+    }
+}
+
+impl<'a, T: 'a + std::fmt::Debug + Serialize + Eq + Delta<'a>> Delta<'a> for Option<T> {
+    type Delta = DeltaOrT<'a, T>;
+    fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
+        match (prev, self) {
+            (None, None) => None,
+            (Some(old), Some(new)) => new.delta(old).map(DeltaOrT::Delta),
+            (None, Some(x)) => Some(DeltaOrT::T(x)),
+            (Some(_), None) => Some(DeltaOrT::None),
+        }
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[serde(rename_all = "snake_case")]
@@ -214,6 +257,13 @@ pub fn is_false(x: &bool) -> bool {
 
 pub fn is_zero_u8(x: &u8) -> bool {
     *x == 0
+}
+
+impl<'a, T: HasId<'a>> HasId<'a> for Option<T> {
+    type Id = Option<T::Id>;
+    fn id(&'a self) -> Self::Id {
+        self.as_ref().map(|x| x.id())
+    }
 }
 
 #[cfg(test)]
