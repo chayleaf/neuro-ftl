@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::BTreeMap};
 
 use neuro_ftl_derive::Delta;
 use serde::Serialize;
@@ -599,10 +599,12 @@ pub struct Context {
     pub inventory: Option<Inventory>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_store_page: Option<StoreItems>,
-    /*#[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_location: Option<CurrentLocationInfo>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub locations: Vec<LocationInfo>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub sectors: Vec<SectorInfo>,*/
+    pub sectors: Vec<SectorInfo>,
     #[serde(skip_serializing_if = "is_zero")]
     pub in_main_menu: bool,
     #[serde(skip_serializing_if = "is_zero")]
@@ -639,6 +641,19 @@ pub struct Point<T: std::fmt::Debug + Ord + Serialize> {
     pub y: T,
 }
 
+#[derive(Copy, Clone, Debug, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum Direction {
+    TopLeft,
+    Left,
+    BottomLeft,
+    Top,
+    Bottom,
+    TopRight,
+    Right,
+    BottomRight,
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Difficulty {
     #[allow(dead_code)]
@@ -663,13 +678,15 @@ pub enum ShipId {
 pub struct LocationInfo {
     #[delta1]
     pub map_position: Point<i32>,
-    pub map_routes: Vec<Point<i32>>,
+    pub map_routes: BTreeMap<Direction, Point<i32>>,
     /// Your current location.
     #[serde(skip_serializing_if = "Help::is_zero")]
     pub current: Help<bool>,
     /// Rebel Flagship
     #[serde(skip_serializing_if = "Help::is_zero")]
     pub boss: Help<bool>,
+    #[serde(skip_serializing_if = "Help::is_zero")]
+    pub boss_comes_in: Help<usize>,
     /// This is the Federation Base.
     #[serde(skip_serializing_if = "Help::is_zero")]
     pub base: Help<bool>,
@@ -688,6 +705,8 @@ pub struct LocationInfo {
     /// The Rebels have control of this location. Very dangerous.
     #[serde(skip_serializing_if = "Help::is_zero")]
     pub fleet: Help<bool>,
+    #[serde(skip_serializing_if = "Help::is_zero")]
+    pub fleet_comes_in: Help<f64>,
     /// A hostile enemy was left behind at this location.
     #[serde(skip_serializing_if = "Help::is_zero")]
     pub hostile: Help<bool>,
@@ -733,6 +752,44 @@ pub struct LocationInfo {
     /// The Fleet's Anti-Ship Batteries are targeting you.
     #[serde(skip_serializing_if = "Help::is_zero")]
     pub planetary_defense_system_fleet: Help<bool>,
+}
+
+#[derive(Clone, Debug, Serialize, Delta, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CurrentLocationInfo {
+    #[delta1]
+    pub map_position: Point<i32>,
+    pub map_routes: BTreeMap<Direction, Point<i32>>,
+    /// This is the Federation Base.
+    #[serde(skip_serializing_if = "Help::is_zero")]
+    pub base: Help<bool>,
+    /// This is the exit beacon. Go here to travel to the next sector.
+    #[serde(skip_serializing_if = "Help::is_zero")]
+    pub exit: Help<bool>,
+    /// You previously found a store at this location.
+    #[serde(skip_serializing_if = "Help::is_zero")]
+    pub store: Help<bool>,
+    /// The Rebel Fleet was prepared for the nebula in this sector, so it won't be as effective a hiding spot. The nebula will still disrupt your sensors.
+    #[serde(skip_serializing_if = "Help::is_zero")]
+    pub nebula_fleet: Help<bool>,
+    /// The nebula here will make fleet pursuit slower but will disrupt your sensors.
+    #[serde(skip_serializing_if = "Help::is_zero")]
+    pub nebula: Help<bool>,
+    /// Asteroid field detected in this location.
+    #[serde(skip_serializing_if = "Help::is_zero")]
+    pub asteroids: Help<bool>,
+    /// Beacon coordinates appear to be very close to a nearby sun.
+    #[serde(skip_serializing_if = "Help::is_zero")]
+    pub sun: Help<bool>,
+    /// This section of the nebula is experiencing an ion storm.
+    #[serde(skip_serializing_if = "Help::is_zero")]
+    pub ion: Help<bool>,
+    /// A pulsar is flooding this area with dangerous electromagnetic forces.
+    #[serde(skip_serializing_if = "Help::is_zero")]
+    pub pulsar: Help<bool>,
+    /// The Fleet's Anti-Ship Batteries are targeting you.
+    #[serde(skip_serializing_if = "Help::is_zero")]
+    pub planetary_defense_system_fleet: Help<bool>,
     /// An Anti-Ship Battery on the planet is targeting you.
     #[serde(skip_serializing_if = "Help::is_zero")]
     pub planetary_defense_system_player: Help<bool>,
@@ -748,15 +805,17 @@ impl LocationInfo {
     pub fn new_map() -> Self {
         Self {
             map_position: Point::default(),
-            map_routes: vec![],
+            map_routes: BTreeMap::new(),
             current: Help::new(text("map_current_loc"), false),
             boss: Help::new(text("map_boss_loc"), false),
+            boss_comes_in: Help::new(strings::LOC_BOSS1, 0),
             base: Help::new(text("map_base_loc"), false),
             exit: Help::new(text("map_exit_loc"), false),
             rebels: Help::new(text("map_rebels_loc"), false),
             store: Help::new(text("map_store_loc"), false),
             repair: Help::new(text("map_repair_loc"), false),
             fleet: Help::new(text("map_fleet_loc"), false),
+            fleet_comes_in: Help::new(strings::LOC_FLEET1, 0.0),
             hostile: Help::new(text("map_hostile_loc"), false),
             nothing: Help::new(text("map_nothing_loc"), false),
             distress: Help::new(text("map_distress_loc"), false),
@@ -772,41 +831,6 @@ impl LocationInfo {
             pulsar: Help::new(text("map_pulsar_loc"), false),
             planetary_defense_system: Help::new(text("map_pds_loc"), false),
             planetary_defense_system_fleet: Help::new(text("map_pds_fleet"), false),
-            planetary_defense_system_all: Help::new(strings::BUG, false),
-            planetary_defense_system_enemy: Help::new(strings::BUG, false),
-            planetary_defense_system_player: Help::new(strings::BUG, false),
-        }
-    }
-    pub fn new_current() -> Self {
-        Self {
-            map_position: Point::default(),
-            map_routes: vec![],
-            current: Help::new(strings::BUG, false),
-            boss: Help::new(strings::BUG, false),
-            base: Help::new(strings::LOC_BASE, false),
-            exit: Help::new(strings::LOC_EXIT, false),
-            rebels: Help::new(strings::LOC_REBELS, false),
-            store: Help::new(strings::LOC_STORE, false),
-            repair: Help::new(strings::BUG, false),
-            fleet: Help::new(strings::BUG, false),
-            hostile: Help::new(strings::BUG, false),
-            nothing: Help::new(strings::BUG, false),
-            distress: Help::new(strings::BUG, false),
-            ship: Help::new(strings::BUG, false),
-            quest: Help::new(strings::BUG, false),
-            merchant: Help::new(strings::BUG, false),
-            unvisited: Help::new(strings::BUG, false),
-            nebula_fleet: Help::new(strings::LOC_NEBULA_FLEET, false),
-            nebula: Help::new(text("tooltip_nebula"), false),
-            asteroids: Help::new(text("tooltip_asteroids"), false),
-            sun: Help::new(text("tooltip_sun"), false),
-            ion: Help::new(text("tooltip_storm"), false),
-            pulsar: Help::new(text("tooltip_pulsar"), false),
-            planetary_defense_system: Help::new(strings::BUG, false),
-            planetary_defense_system_fleet: Help::new(text("tooltip_PDS_FLEET"), false),
-            planetary_defense_system_player: Help::new(text("tooltip_PDS_PLAYER"), false),
-            planetary_defense_system_enemy: Help::new(text("tooltip_PDS_ENEMY"), false),
-            planetary_defense_system_all: Help::new(text("tooltip_PDS_ALL"), false),
         }
     }
 }
@@ -816,7 +840,7 @@ impl LocationInfo {
 pub struct SectorInfo {
     #[delta1]
     pub map_position: Point<i32>,
-    pub map_routes: Vec<Point<i32>>,
+    pub map_routes: BTreeMap<Direction, Point<i32>>,
     // only add this if this is immediately reachable
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,

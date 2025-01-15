@@ -2,7 +2,7 @@
 use std::{
     borrow::Cow,
     cmp::Ordering,
-    collections::HashMap,
+    collections::BTreeMap,
     ffi::{c_double, c_float, c_int, c_uint},
     fmt,
     marker::PhantomData,
@@ -1033,7 +1033,7 @@ impl<T> Vector<T> {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    pub fn iter(&self) -> impl Iterator<Item = &T> {
+    pub fn iter(&self) -> impl Iterator<Item = &T> + DoubleEndedIterator {
         unsafe { std::slice::from_raw_parts(self.start, self.len()) }.iter()
     }
 }
@@ -2482,8 +2482,20 @@ pub struct Location {
 }
 
 impl Location {
-    pub fn neighbors(&self) -> HashMap<Direction, *mut Self> {
-        let mut ret = HashMap::new();
+    pub fn visited(&self) -> bool {
+        self.visited != 0
+    }
+    pub fn event(&self) -> Option<&LocationEvent> {
+        unsafe { xc(self.event) }
+    }
+    pub fn pos(&self) -> Point {
+        Point {
+            x: (self.loc.x as i32) / 110,
+            y: (self.loc.y as i32) / 110,
+        }
+    }
+    pub fn neighbors(&self) -> BTreeMap<Direction, *mut Self> {
+        let mut ret = BTreeMap::new();
         let x0 = (self.loc.x as u64) / 110;
         let y0 = (self.loc.y as u64) / 110;
         for l in self.connected_locations.iter().copied() {
@@ -2635,8 +2647,8 @@ impl Equipment {
             .collect()
     }
     pub fn has_augment(&self, augment: &str) -> bool {
-        for b in self.v_equipment_boxes.iter() {
-            let b = unsafe { xc(*b).unwrap() };
+        for b in self.boxes::<AugmentEquipBox>() {
+            let b = unsafe { xc(b).unwrap() };
             if b.item.augment().is_some_and(|x| x.name.to_str() == augment) {
                 return true;
             }
@@ -3537,8 +3549,8 @@ pub struct Sector {
 }
 
 impl Sector {
-    pub fn neighbors(&self) -> HashMap<Direction, *mut Self> {
-        let mut ret = HashMap::new();
+    pub fn neighbors(&self) -> BTreeMap<Direction, *mut Self> {
+        let mut ret = BTreeMap::new();
         let x0 = self.location.x;
         let y0 = self.location.y;
         for s in self.neighbors.iter().copied() {
@@ -3825,11 +3837,91 @@ pub struct StarMap {
 }
 
 impl StarMap {
+    pub fn danger_progress_expectation(&self) -> f64 {
+        let mut total = 0;
+        let mut cnt = 0;
+        for loc in self.locations.iter() {
+            let Some(loc) = (unsafe { xc(*loc) }) else {
+                continue;
+            };
+            cnt += 1;
+            total += if loc.nebula {
+                if self.b_nebula_map {
+                    51
+                } else {
+                    32
+                }
+            } else {
+                64
+            };
+        }
+        total as f64 / cnt as f64
+    }
+    pub fn fleet_time(&self, loc: &Location, exp: f64) -> f64 {
+        if loc.danger_zone {
+            return 0.0;
+        }
+        let (c, k) = if self.pursuit_delay < 0 {
+            (-self.pursuit_delay, 0.0)
+        } else if self.pursuit_delay > 0 {
+            (self.pursuit_delay, 2.0)
+        } else {
+            (0, 1.0)
+        };
+        // given:
+        // - p1 - danger zone pos
+        // - p2 - location
+        // find: min x1 such that dist(p1, p2) < 767
+        // solution:
+        //  x1 d3 x2
+        // y1 \---|
+        //     \  |d1
+        //   d2 \ |
+        // y2    \|
+        // d1 = |y2 - y1|
+        // d2 = 767
+        // d3 = sqrt(d2^2 - d1^2)
+        let p = self.danger_zone;
+        let d1 = p.y.abs_diff(loc.pos().y);
+        let d2 = 767;
+        let d3 = ((d2 * d2) as f64 - (d1 * d1) as f64).sqrt();
+        // target danger zone x
+        let x1 = loc.pos().x as f64 - d3;
+        let x0 = p.x as f64;
+        let (x0, exp, moves) = if x1 < x0 + exp * k * c as f64 {
+            (x0, exp * k, 0.0)
+        } else {
+            let x0 = x0 + exp * k * c as f64;
+            let moves = c as f64;
+            (x0, exp, moves)
+        };
+        moves + (x1 - x0) / exp
+    }
     pub fn current_loc(&self) -> Option<&Location> {
         unsafe { xc(self.current_loc) }
     }
     pub fn current_sector(&self) -> Option<&Sector> {
         unsafe { xc(self.current_sector) }
+    }
+    pub fn boss_time(&self, loc: *mut Location) -> Option<usize> {
+        if !self.boss_level || self.boss_loc < 0 {
+            return None;
+        }
+        if self.boss_loc == self.boss_path.len() as c_int - 1 {
+            self.boss_path
+                .iter()
+                .rev()
+                .enumerate()
+                .find(|(_, x)| **x == loc)
+                .map(|x| x.0)
+        } else {
+            self.boss_path
+                .iter()
+                .skip(self.boss_loc as usize)
+                .enumerate()
+                .find(|(_, x)| **x == loc)
+                .map(|x| x.0)
+        }
     }
 }
 
@@ -8822,6 +8914,18 @@ impl CommandGui {
 pub struct Point {
     pub x: i32,
     pub y: i32,
+}
+
+impl Point {
+    pub fn add_x(self, x: i32) -> Self {
+        Self {
+            x: self.x + x,
+            y: self.y,
+        }
+    }
+    pub fn dist2(self, other: Self) -> u32 {
+        self.x.abs_diff(other.x).pow(2) + self.y.abs_diff(other.y).pow(2)
+    }
 }
 
 #[repr(C)]

@@ -276,16 +276,18 @@ pub struct BuySystem {
     pub system_name: String,
 }
 
-#[derive(Copy, Clone, Debug, Deserialize, JsonSchemaNoRef, Hash, Eq, PartialEq)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, JsonSchemaNoRef, Hash, Eq, PartialEq, Ord, PartialOrd,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Direction {
     TopLeft,
-    Top,
-    TopRight,
     Left,
-    Right,
     BottomLeft,
+    Top,
     Bottom,
+    TopRight,
+    Right,
     BottomRight,
 }
 

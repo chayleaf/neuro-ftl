@@ -5319,13 +5319,207 @@ fn ship_manager_desc(
     }
 }
 
-/*fn locations(s: &bindings::StarMap) -> Vec<context::LocationInfo> {
+impl From<bindings::Point> for context::Point<i32> {
+    fn from(value: bindings::Point) -> Self {
+        Self {
+            x: value.x,
+            y: value.y,
+        }
+    }
+}
 
+impl From<actions::Direction> for context::Direction {
+    fn from(value: actions::Direction) -> Self {
+        match value {
+            actions::Direction::Top => context::Direction::Top,
+            actions::Direction::Bottom => context::Direction::Bottom,
+            actions::Direction::BottomLeft => context::Direction::BottomLeft,
+            actions::Direction::BottomRight => context::Direction::BottomRight,
+            actions::Direction::TopLeft => context::Direction::TopLeft,
+            actions::Direction::TopRight => context::Direction::TopRight,
+            actions::Direction::Left => context::Direction::Left,
+            actions::Direction::Right => context::Direction::Right,
+        }
+    }
+}
+
+fn locations(s: &bindings::StarMap, eq: &bindings::Equipment) -> Vec<context::LocationInfo> {
+    let scanners = eq.has_augment("ADV_SCANNERS");
+    let exp = s.danger_progress_expectation();
+    let mut locs: Vec<_> = s
+        .locations
+        .iter()
+        .filter_map(|x| unsafe { xc(*x) })
+        .map(|x| context::LocationInfo {
+            map_position: x.pos().into(),
+            map_routes: x
+                .neighbors()
+                .into_iter()
+                .map(|(k, v)| (k.into(), unsafe { xc(v).unwrap() }.pos().into()))
+                .collect(),
+            current: Help::new(text("map_current_loc"), ptr::addr_of!(*x) == s.current_loc),
+            boss: Help::new(
+                text("map_boss_loc"),
+                s.boss_time(ptr::addr_of!(*x).cast_mut()) == Some(0),
+            ),
+            boss_comes_in: Help::new(
+                strings::LOC_BOSS1,
+                s.boss_time(ptr::addr_of!(*x).cast_mut())
+                    .unwrap_or_default(),
+            ),
+            exit: Help::new(text("map_exit_loc"), !s.boss_level && x.beacon),
+            base: Help::new(text("map_base_loc"), s.boss_level && x.beacon),
+            rebels: Help::new(text("map_rebels_loc"), !x.beacon && x.fleet_changing),
+            store: Help::new(
+                text("map_store_loc"),
+                !x.boss && x.event().is_some_and(|x| !x.p_store.is_null()),
+            ),
+            fleet: Help::new(text("map_fleet_loc"), x.danger_zone),
+            fleet_comes_in: Help::new(strings::LOC_FLEET1, s.fleet_time(x, exp)),
+            repair: Help::new(
+                text("map_repair_loc"),
+                !x.danger_zone
+                    && (x.known || s.b_map_revealed)
+                    && x.event().is_some_and(|x| x.repair),
+            ),
+            hostile: Help::new(
+                text("map_hostile_loc"),
+                !x.danger_zone && x.visited() && x.event().is_some_and(|x| x.ship.present),
+            ),
+            nothing: Help::new(
+                text("map_nothing_loc"),
+                !x.danger_zone && x.visited() && !x.event().is_some_and(|x| x.ship.present),
+            ),
+            distress: Help::new(
+                text("map_distress_loc"),
+                !x.danger_zone
+                    && (x.known || s.b_map_revealed)
+                    && x.event().is_some_and(|x| x.distress_beacon),
+            ),
+            ship: Help::new(
+                text("map_ship_loc"),
+                !x.danger_zone
+                    && (x.known && scanners || s.b_map_revealed)
+                    && x.event().is_some_and(|x| !x.repair && x.ship.present),
+            ),
+            quest: Help::new(text("map_quest_loc"), !x.danger_zone && x.quest_loc),
+            merchant: Help::new(
+                text("map_merchant_loc"),
+                !x.danger_zone
+                    && (x.known || s.b_map_revealed)
+                    && x.event().is_some_and(|x| x.store),
+            ),
+            unvisited: Help::new(text("map_unvisited_loc"), !x.visited()),
+            nebula_fleet: Help::new(strings::LOC_NEBULA_FLEET, x.nebula && s.b_nebula_map),
+            nebula: Help::new(text("map_nebula_loc"), x.nebula && !s.b_nebula_map),
+            asteroids: Help::new(
+                text("map_asteroid_loc"),
+                x.event().is_some_and(|x| x.environment == 1),
+            ),
+            sun: Help::new(
+                text("map_sun_loc"),
+                x.event().is_some_and(|x| x.environment == 2),
+            ),
+            ion: Help::new(
+                text("map_ion_loc"),
+                x.event().is_some_and(|x| x.environment == 4),
+            ),
+            pulsar: Help::new(
+                text("map_pulsar_loc"),
+                x.event().is_some_and(|x| x.environment == 5),
+            ),
+            planetary_defense_system: Help::new(
+                text("map_pds_loc"),
+                !x.boss && !x.danger_zone && x.event().is_some_and(|x| x.environment == 6),
+            ),
+            planetary_defense_system_fleet: Help::new(
+                text("map_pds_fleet"),
+                !x.boss && x.danger_zone && x.event().is_some_and(|x| x.environment == 6),
+            ),
+        })
+        .collect();
+    locs.sort_by_key(|loc| (loc.map_position.x, loc.map_position.y));
+    locs
+}
+
+fn location(s: &bindings::StarMap, x: &bindings::Location) -> context::CurrentLocationInfo {
+    context::CurrentLocationInfo {
+        map_position: x.pos().into(),
+        map_routes: x
+            .neighbors()
+            .into_iter()
+            .map(|(k, v)| (k.into(), unsafe { xc(v).unwrap() }.pos().into()))
+            .collect(),
+        base: Help::new(strings::LOC_BASE, s.boss_level && x.beacon),
+        exit: Help::new(strings::LOC_EXIT, !s.boss_level && x.beacon),
+        store: Help::new(
+            strings::LOC_STORE,
+            !x.boss && x.event().is_some_and(|x| !x.p_store.is_null()),
+        ),
+        nebula_fleet: Help::new(strings::LOC_NEBULA_FLEET, x.nebula && s.b_nebula_map),
+        nebula: Help::new(text("tooltip_nebula"), x.nebula && !s.b_nebula_map),
+        asteroids: Help::new(
+            text("tooltip_asteroids"),
+            x.event().is_some_and(|x| x.environment == 1),
+        ),
+        sun: Help::new(
+            text("tooltip_sun"),
+            x.event().is_some_and(|x| x.environment == 2),
+        ),
+        ion: Help::new(
+            text("tooltip_storm"),
+            x.event().is_some_and(|x| x.environment == 4),
+        ),
+        pulsar: Help::new(
+            text("tooltip_pulsar"),
+            x.event().is_some_and(|x| x.environment == 5),
+        ),
+        planetary_defense_system_fleet: Help::new(
+            text("tooltip_PDS_FLEET"),
+            x.danger_zone && x.event().is_some_and(|x| matches!(x.environment, 6 | 9)),
+        ),
+        planetary_defense_system_player: Help::new(
+            text("tooltip_PDS_PLAYER"),
+            x.event()
+                .is_some_and(|x| matches!(x.environment, 6 | 9) && x.environment_target == 0),
+        ),
+        planetary_defense_system_enemy: Help::new(
+            text("tooltip_PDS_ENEMY"),
+            x.event()
+                .is_some_and(|x| matches!(x.environment, 6 | 9) && x.environment_target == 1),
+        ),
+        planetary_defense_system_all: Help::new(
+            text("tooltip_PDS_ALL"),
+            x.event().is_some_and(|x| {
+                matches!(x.environment, 6 | 9) && !matches!(x.environment_target, 0 | 1)
+            }),
+        ),
+    }
 }
 
 fn sectors(s: &bindings::StarMap) -> Vec<context::SectorInfo> {
-
-}*/
+    let mut secs: Vec<_> = s
+        .sectors
+        .iter()
+        .filter_map(|x| unsafe { xc(*x) })
+        .filter(|x| x.reachable)
+        .map(|x| context::SectorInfo {
+            map_position: x.location.into(),
+            map_routes: x
+                .neighbors()
+                .into_iter()
+                .map(|(k, v)| (k.into(), unsafe { xc(v).unwrap() }.location.into()))
+                .collect(),
+            name: Some(x.description.name.to_str().into_owned()),
+            hostile: x.type_ == 1,
+            civilian: x.type_ == 0,
+            nebula: x.type_ == 2,
+            unknown: x.type_ == 4,
+        })
+        .collect();
+    secs.sort_by_key(|sec| (sec.map_position.x, sec.map_position.y));
+    secs
+}
 
 fn collect_context(app: &CApp) -> context::Context {
     if app.lang_chooser.base.b_open {
@@ -5473,7 +5667,6 @@ fn collect_context(app: &CApp) -> context::Context {
             })
             .collect();
     }
-    if gui.star_map().unwrap().base.b_open {}
     let mgr = gui.ship_manager().unwrap();
     context::Context {
         confirmation_message,
@@ -5483,17 +5676,26 @@ fn collect_context(app: &CApp) -> context::Context {
         in_main_menu: false,
         in_new_game_config: false,
         game_over: String::new(),
-        /*locations: gui.star_map().is_some_and(|x| x.base.b_open).then(|| {
-            let s = gui.star_map().unwrap();
-            locations(s)
-        }),
+        current_location: gui
+            .star_map()
+            .and_then(|x| x.current_loc())
+            .map(|x| location(gui.star_map().unwrap(), x)),
+        locations: gui
+            .star_map()
+            .is_some_and(|x| x.base.b_open)
+            .then(|| {
+                let s = gui.star_map().unwrap();
+                locations(s, &gui.equip_screen)
+            })
+            .unwrap_or_default(),
         sectors: gui
             .star_map()
             .is_some_and(|x| x.base.b_open && x.b_choosing_new_sector)
             .then(|| {
                 let s = gui.star_map().unwrap();
                 sectors(s)
-            }),*/
+            })
+            .unwrap_or_default(),
         selected_ship: None,
         victory: None,
         event_text,

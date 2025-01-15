@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::{borrow::Cow, cmp::Ordering};
+use std::{borrow::Cow, cmp::Ordering, collections::BTreeMap};
 
 use crate::game::strings;
 
@@ -24,6 +24,20 @@ impl<'a, 'b: 'a> Delta<'a> for &'b str {
     type Delta = &'a str;
     fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
         (self != prev).then_some(self)
+    }
+}
+
+impl<'a> Delta<'a> for f64 {
+    type Delta = &'a Self;
+    fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
+        (self.to_bits() != prev.to_bits()).then_some(self)
+    }
+}
+
+impl<'a> Delta<'a> for f32 {
+    type Delta = &'a Self;
+    fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
+        (self.to_bits() != prev.to_bits()).then_some(self)
     }
 }
 
@@ -88,7 +102,6 @@ impl<'a, T: 'a + std::fmt::Debug + Serialize + Eq + Delta<'a>> Delta<'a> for Opt
 #[derive(Clone, Debug, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum Operations<A, B> {
-    Reset,
     Added(A),
     Removed(A),
     Changed(B),
@@ -98,49 +111,88 @@ impl<'a, T: Clone + std::fmt::Debug + Delta<'a> + HasId<'a> + Serialize> Delta<'
     type Delta = Vec<Operations<T, T::Delta>>;
     fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
         let mut ret = vec![];
-        if self.len() == prev.len() {
-            let mut this: Vec<_> = self.iter().collect();
-            let mut that: Vec<_> = prev.iter().collect();
-            this.sort_by_key(|x| x.id());
-            that.sort_by_key(|x| x.id());
-            for x in this.windows(2) {
-                if x[0].id() == x[1].id() {
-                    #[cfg(debug_assertions)]
-                    panic!("duplicate id {ret:?}");
-                    #[cfg(not(debug_assertions))]
-                    log::error!("duplicate id {ret:?}");
-                }
+        let mut this: Vec<_> = self.iter().collect();
+        let mut that: Vec<_> = prev.iter().collect();
+        this.sort_by_key(|x| x.id());
+        that.sort_by_key(|x| x.id());
+        for x in this.windows(2) {
+            if x[0].id() == x[1].id() {
+                #[cfg(debug_assertions)]
+                panic!("duplicate id {ret:?}");
+                #[cfg(not(debug_assertions))]
+                log::error!("duplicate id {ret:?}");
             }
-            let mut this = this.into_iter().peekable();
-            let mut that = that.into_iter().peekable();
-            loop {
-                match (this.peek(), that.peek()) {
-                    (None, None) => break,
-                    (None, Some(_)) => {
-                        ret.push(Operations::Removed(that.next().unwrap().clone()));
-                    }
-                    (Some(_), None) => {
-                        ret.push(Operations::Added(this.next().unwrap().clone()));
-                    }
-                    (Some(x), Some(y)) => match x.id().cmp(&y.id()) {
-                        Ordering::Less => ret.push(Operations::Added(this.next().unwrap().clone())),
-                        Ordering::Greater => {
-                            ret.push(Operations::Removed(that.next().unwrap().clone()))
-                        }
-                        Ordering::Equal => {
-                            if let Some(delta) = this.next().unwrap().delta(that.next().unwrap()) {
-                                ret.push(Operations::Changed(delta))
-                            }
-                        }
-                    },
-                }
-            }
-            (!ret.is_empty()).then_some(ret)
-        } else {
-            ret.push(Operations::Reset);
-            ret.extend(self.iter().cloned().map(Operations::Added));
-            Some(ret)
         }
+        let mut this = this.into_iter().peekable();
+        let mut that = that.into_iter().peekable();
+        loop {
+            match (this.peek(), that.peek()) {
+                (None, None) => break,
+                (None, Some(_)) => {
+                    ret.push(Operations::Removed(that.next().unwrap().clone()));
+                }
+                (Some(_), None) => {
+                    ret.push(Operations::Added(this.next().unwrap().clone()));
+                }
+                (Some(x), Some(y)) => match x.id().cmp(&y.id()) {
+                    Ordering::Less => ret.push(Operations::Added(this.next().unwrap().clone())),
+                    Ordering::Greater => {
+                        ret.push(Operations::Removed(that.next().unwrap().clone()))
+                    }
+                    Ordering::Equal => {
+                        if let Some(delta) = this.next().unwrap().delta(that.next().unwrap()) {
+                            ret.push(Operations::Changed(delta))
+                        }
+                    }
+                },
+            }
+        }
+        (!ret.is_empty()).then_some(ret)
+    }
+}
+
+impl<
+        'a,
+        K: Clone + std::fmt::Debug + Serialize + Ord,
+        T: Clone + std::fmt::Debug + Delta<'a> + Serialize,
+    > Delta<'a> for BTreeMap<K, T>
+{
+    type Delta = BTreeMap<K, Operations<T, T::Delta>>;
+    fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
+        let mut ret = BTreeMap::new();
+        let mut this = self.iter().peekable();
+        let mut that = prev.iter().peekable();
+        loop {
+            match (this.peek(), that.peek()) {
+                (None, None) => break,
+                (None, Some(_)) => {
+                    let (k, v) = that.next().unwrap();
+                    ret.insert(k.clone(), Operations::Removed(v.clone()));
+                }
+                (Some(_), None) => {
+                    let (k, v) = this.next().unwrap().clone();
+                    ret.insert(k.clone(), Operations::Added(v.clone()));
+                }
+                (Some(x), Some(y)) => match x.0.cmp(y.0) {
+                    Ordering::Less => {
+                        let (k, v) = this.next().unwrap().clone();
+                        ret.insert(k.clone(), Operations::Added(v.clone()));
+                    }
+                    Ordering::Greater => {
+                        let (k, v) = that.next().unwrap().clone();
+                        ret.insert(k.clone(), Operations::Removed(v.clone()));
+                    }
+                    Ordering::Equal => {
+                        let (k, a) = this.next().unwrap();
+                        let (_, b) = that.next().unwrap();
+                        if let Some(delta) = a.delta(&b) {
+                            ret.insert(k.clone(), Operations::Changed(delta));
+                        }
+                    }
+                },
+            }
+        }
+        (!ret.is_empty()).then_some(ret)
     }
 }
 
