@@ -366,6 +366,12 @@ pub struct Lockdown {
     pub crew_member_name: String,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectShip {
+    pub ship_name: String,
+}
+
 #[derive(Actions, Debug)]
 pub enum FtlActions {
     /// Skip credits
@@ -611,4 +617,7 @@ pub enum FtlActions {
     /// found, but no telling who will find you first.
     #[name = "skip_turn"]
     Wait(Wait),
+    /// Select a ship layout/variation by its name. It must be unlocked.
+    #[name = "select_ship"]
+    SelectShip(SelectShip),
 }

@@ -9,14 +9,21 @@ use std::{
 };
 
 use actions::{FtlActions, InventorySlotType, TargetShip};
+use context::{
+    util::{Delta, Help},
+    ShipId, SystemLevel,
+};
 use futures_util::{SinkExt, StreamExt};
 use indexmap::IndexMap;
 use neuro_sama::game::{Action, ApiMut};
 use rand::Rng;
-use serde::Serialize;
+use strings::text;
 use tokio::sync::mpsc;
 
-use crate::bindings::{self, power_manager, xc, xm, CApp, Door, System};
+use crate::{
+    bindings::{self, power_manager, xb, xc, xm, CApp, Door, System},
+    xml::DroneType,
+};
 
 pub mod actions;
 mod context;
@@ -35,7 +42,7 @@ struct State {
     rx: mpsc::Receiver<Option<tungstenite::Message>>,
     app: *mut CApp,
     actions: ActionDb,
-    //buffer: context::Context,
+    buffer: Option<context::Context>,
 }
 
 unsafe impl Sync for State {}
@@ -350,6 +357,64 @@ impl neuro_sama::game::GameMut for State {
                     }
                 } else {
                     Err(Cow::from("nothing to confirm").into())
+                }
+            }
+            FtlActions::SelectShip(event) => {
+                let s = &mut app.menu.ship_builder;
+                if self.actions.valid(&event) {
+                    if let Some((i, j, unlocked)) = s
+                        .ships
+                        .into_iter()
+                        .enumerate()
+                        .flat_map(|(i, x)| {
+                            let ship_name = &event.ship_name;
+                            x.into_iter().enumerate().filter_map(move |(j, x)| {
+                                let unlocked = unsafe {
+                                    (**(*crate::ACHIEVEMENTS.0)
+                                        .ship_unlocks
+                                        .get(i)
+                                        .unwrap()
+                                        .get(j)
+                                        .unwrap())
+                                    .unlocked
+                                };
+                                if !unlocked {
+                                    return None;
+                                }
+                                let bp = unsafe { xb(x) }?;
+                                (ship_name == &bp.desc.title.to_str()).then_some((i, j, unlocked))
+                            })
+                        })
+                        .next()
+                    {
+                        if unlocked {
+                            unsafe {
+                                if let Some(ship) = xm(s.current_ship) {
+                                    ship.vtable().base.delete_dtor(s.current_ship.cast());
+                                    s.current_ship = ptr::null_mut();
+                                }
+                                super::SWITCH_SHIP.call(ptr::addr_of_mut!(*s), i as i32, j as i32);
+                            }
+                            Ok(Cow::from("selected the ship layout {i}/variation {j}").into())
+                        } else {
+                            Err(Cow::from("can't select a ship at the moment").into())
+                        }
+                    } else {
+                        let names: Vec<_> = s
+                            .ships
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|x| unsafe { xb(x) })
+                            .map(|x| serde_json::Value::String(x.desc.title.to_str().into_owned()))
+                            .collect();
+                        Err(Cow::from(format!(
+                            "the ship was not found, available ship names: {}",
+                            serde_json::to_string(&names).unwrap()
+                        ))
+                        .into())
+                    }
+                } else {
+                    Err(Cow::from("can't select a ship at the moment").into())
                 }
             }
             FtlActions::RenameShip(event) => {
@@ -756,8 +821,8 @@ impl neuro_sama::game::GameMut for State {
                                     + system.i_bonus_power
                                     + system.power_state.first;
                                 Ok(Cow::from(format!(
-                                    "system power successfully increased to {}/{}, reactor state: {}",
-                                    system.power_state.first, system.power_state.second, reactor_state(system.i_ship_id),
+                                    "system power successfully increased to {}/{}",
+                                    system.power_state.first, system.power_state.second
                                 ))
                                 .into())
                             } else {
@@ -785,10 +850,8 @@ impl neuro_sama::game::GameMut for State {
                                 + system.i_bonus_power
                                 + system.power_state.first;
                             Ok(Cow::from(format!(
-                                "system power successfully decreased to {}/{}, reactor state: {}",
-                                system.power_state.first,
-                                system.power_state.second,
-                                reactor_state(system.i_ship_id)
+                                "system power successfully decreased to {}/{}",
+                                system.power_state.first, system.power_state.second,
                             ))
                             .into())
                         } else {
@@ -2990,40 +3053,19 @@ impl neuro_sama::game::GameMut for State {
     }
 }
 
-fn is_zero<T: From<bool> + PartialEq>(x: &T) -> bool {
-    *x == T::from(false)
-}
-
-#[derive(Serialize)]
-struct ReactorState {
-    power_used: i32,
-    max_power: i32,
-    #[serde(skip_serializing_if = "is_zero")]
-    battery_power_used: i32,
-    #[serde(skip_serializing_if = "is_zero")]
-    max_battery_power: i32,
-    #[serde(skip_serializing_if = "is_zero")]
-    reduced_capacity: bool,
-    #[serde(skip_serializing_if = "is_zero")]
-    hacked: bool,
-}
-
-fn reactor_state(ship_id: i32) -> String {
-    let Some(pow_man) = power_manager(ship_id) else {
-        return "{}".to_owned();
-    };
-    let state = ReactorState {
-        power_used: pow_man.current_power.first,
-        max_power: (pow_man.current_power.second - pow_man.i_hacked - pow_man.i_temp_power_loss)
-            .min(pow_man.i_temp_power_cap),
-        battery_power_used: pow_man.battery_power.first,
-        max_battery_power: pow_man.battery_power.second,
-        reduced_capacity: pow_man.i_temp_power_loss != 0
-            || pow_man.i_temp_power_cap < pow_man.current_power.second
-            || pow_man.i_hacked != 0,
-        hacked: pow_man.i_hacked > 0,
-    };
-    serde_json::to_string(&state).unwrap()
+fn reactor_state(ship_id: i32) -> Option<context::ReactorState> {
+    let mgr = power_manager(ship_id)?;
+    Some(context::ReactorState {
+        power_used: mgr.current_power.first,
+        max_power: (mgr.current_power.second - mgr.i_hacked - mgr.i_temp_power_loss)
+            .min(mgr.i_temp_power_cap),
+        battery_power_used: mgr.battery_power.first,
+        max_battery_power: mgr.battery_power.second,
+        reduced_capacity: mgr.i_temp_power_loss != 0
+            || mgr.i_temp_power_cap < mgr.current_power.second
+            || mgr.i_hacked != 0,
+        hacked: mgr.i_hacked > 0,
+    })
 }
 
 static mut GAME: OnceLock<State> = OnceLock::new();
@@ -3058,7 +3100,6 @@ impl Force {
 struct ActionDb {
     actions: IndexMap<&'static str, neuro_sama::schema::Action>,
     force: Option<Force>,
-    action_context: Option<(String, bool)>,
 }
 
 impl ActionDb {
@@ -3174,8 +3215,7 @@ fn available_actions(app: &CApp) -> ActionDb {
         if app.menu.ship_builder.b_open {
             let s = &app.menu.ship_builder;
             // TODO: (?) difficulty selection actions, enable advanced edition action
-            ret.add::<actions::RenameCrew>();
-            let mut meta = meta::<actions::RenameCrew>();
+            let mut m = meta::<actions::RenameCrew>();
             let names = IdMap::with(|map| {
                 s.v_crew_boxes
                     .iter()
@@ -3188,8 +3228,18 @@ fn available_actions(app: &CApp) -> ActionDb {
                     })
                     .collect::<Vec<_>>()
             });
-            add_enum(prop(&mut meta.schema, "oldName"), names);
-            ret.actions.insert(actions::RenameCrew::name(), meta);
+            add_enum(prop(&mut m.schema, "oldName"), names);
+            ret.actions.insert(actions::RenameCrew::name(), m);
+            let mut meta = meta::<actions::SelectShip>();
+            let names = s
+                .ships
+                .into_iter()
+                .flatten()
+                .filter_map(|x| unsafe { xb(x) })
+                .map(|x| serde_json::Value::String(x.desc.title.to_str().into_owned()))
+                .collect();
+            add_enum(prop(&mut meta.schema, "shipName"), names);
+            ret.actions.insert(actions::SelectShip::name(), meta);
             ret.add::<actions::RenameShip>();
             ret.add::<actions::StartGame>();
             return ret;
@@ -3316,14 +3366,8 @@ fn available_actions(app: &CApp) -> ActionDb {
             .into();
             ret.actions.insert(name, meta);
         }
-        ret.action_context = Some((
-            "Current event:\n".to_owned()
-                + &c.main_text.to_str()
-                + &resource_event_str(&c.rewards, gui.ship_manager().unwrap()),
-            false,
-        ));
         ret.force = Some(Force::new(
-            ret.action_context.as_ref().unwrap().0.clone(),
+            "Please pick an event option (`choose1`, etc)",
             Duration::from_secs(10),
         ));
         return ret;
@@ -3916,27 +3960,1719 @@ fn available_actions(app: &CApp) -> ActionDb {
         add_enum(prop(&mut m.schema, "crewMemberName"), names1);
         ret.actions.insert(actions::Lockdown::name(), m);
     }
-    // gui.sys_control.sys_boxes - iterate to get all the systems
-    // 14 MindBox
-    // 13 CloneBox
-    // 15 HackBox
-    // 9 TeleportBox
-    // 10 CloakingBox
-    // 11 ArtilleryBox
-    // SystemBox
-    // 3 WeaponSystemBox
-    // 4 SystemBox
     ret
 }
 
-// power state: second is max, first is current, i think
+fn room_desc(
+    room: &bindings::Room,
+    mgr: &bindings::ShipManager,
+    door_map: &[Vec<context::DoorInfoShort>],
+    crew_map: &[Vec<String>],
+    intruder_map: &[Vec<String>],
+) -> context::RoomInfo {
+    context::RoomInfo {
+        faction: if room.i_ship_id == 0 {
+            ShipId::Player
+        } else {
+            ShipId::Enemy
+        },
+        room_id: room.i_room_id as u32,
+        doors: door_map
+            .get(room.i_room_id as usize)
+            .cloned()
+            .unwrap_or_default(),
+        crew_member_names: crew_map
+            .get(room.i_room_id as usize)
+            .cloned()
+            .unwrap_or_default(),
+        intruder_names: intruder_map
+            .get(room.i_room_id as usize)
+            .cloned()
+            .unwrap_or_default(),
+        fire_level: room.i_fire_count,
+        oxygen_percentage: mgr
+            .oxygen_system()
+            .map(|x| *x.oxygen_levels.get(room.i_room_id as usize).unwrap() as i32)
+            .unwrap_or_default(),
+        hacked: room.i_hack_level > 1,
+    }
+}
+
+fn door_desc(door: &bindings::Door) -> context::DoorInfo {
+    context::DoorInfo {
+        faction: if door.base.i_ship_id == 0 {
+            ShipId::Player
+        } else {
+            ShipId::Enemy
+        },
+        door_id: door.i_door_id,
+        room_id_1: door.i_room1,
+        room_id_2: door.i_room2,
+        open: door.b_open,
+        lockdown: door.locked_down.running,
+        hacked: door.i_hacked > 1,
+    }
+}
+
+fn crew_desc<'a>(crew: &'a bindings::CrewMember, map: &mut IdMap<'a>) -> context::CrewInfo {
+    let species = context::Species::from_id(&crew.species.to_str());
+    context::CrewInfo {
+        name: map.map(crew.blueprint.crew_name_long.to_str()).into_owned(),
+        // same as blueprint.name
+        species,
+        faction: if crew.i_ship_id == 0 {
+            ShipId::Player
+        } else {
+            ShipId::Enemy
+        },
+        location: (crew.current_ship_id >= 0 && crew.i_room_id >= 0).then_some(context::Location {
+            ship: if crew.current_ship_id == 0 {
+                ShipId::Player
+            } else {
+                ShipId::Enemy
+            },
+            room_id: crew.i_room_id as u32,
+        }),
+        bonuses: {
+            let p_crew = ptr::addr_of!(*crew).cast_mut();
+            context::Skills {
+                piloting_evasion: Help::new(strings::SKILL_PILOTING, {
+                    let skill = crew
+                        .blueprint
+                        .skill_level
+                        .get(bindings::CrewSkill::Piloting as i32 as usize)
+                        .unwrap();
+                    bindings::CrewSkill::Piloting.bonus(if skill.first == skill.second {
+                        3
+                    } else if skill.first >= skill.second / 2 {
+                        2
+                    } else {
+                        1
+                    }) as u8
+                }),
+                engines_evasion: Help::new(strings::SKILL_ENGINES, {
+                    let skill = crew
+                        .blueprint
+                        .skill_level
+                        .get(bindings::CrewSkill::Engines as i32 as usize)
+                        .unwrap();
+                    bindings::CrewSkill::Engines.bonus(if skill.first == skill.second {
+                        3
+                    } else if skill.first >= skill.second / 2 {
+                        2
+                    } else {
+                        1
+                    }) as u8
+                }),
+                shields_recharge: Help::new(strings::SKILL_SHIELDS, {
+                    let skill = crew
+                        .blueprint
+                        .skill_level
+                        .get(bindings::CrewSkill::Shields as i32 as usize)
+                        .unwrap();
+                    ((bindings::CrewSkill::Shields.bonus(if skill.first == skill.second {
+                        3
+                    } else if skill.first >= skill.second / 2 {
+                        2
+                    } else {
+                        1
+                    }) - 1.0)
+                        * 100.0) as u8
+                }),
+                weapons_recharge: Help::new(strings::SKILL_WEAPONS, {
+                    let skill = crew
+                        .blueprint
+                        .skill_level
+                        .get(bindings::CrewSkill::Weapons as i32 as usize)
+                        .unwrap();
+                    ((1.0
+                        - bindings::CrewSkill::Weapons.bonus(if skill.first == skill.second {
+                            3
+                        } else if skill.first >= skill.second / 2 {
+                            2
+                        } else {
+                            1
+                        }))
+                        * 100.0) as u8
+                }),
+                repairing_speed: Help::new(strings::SKILL_REPAIRING, {
+                    let skill = crew
+                        .blueprint
+                        .skill_level
+                        .get(bindings::CrewSkill::Repairing as i32 as usize)
+                        .unwrap();
+                    ((bindings::CrewSkill::Repairing.bonus(if skill.first == skill.second {
+                        3
+                    } else if skill.first >= skill.second / 2 {
+                        2
+                    } else {
+                        1
+                    }) - 1.0)
+                        * 100.0
+                        * unsafe { crew.vtable().get_repair_speed(p_crew) })
+                        as u8
+                }),
+                fighting_strength: Help::new(strings::SKILL_FIGHTING, {
+                    let skill = crew
+                        .blueprint
+                        .skill_level
+                        .get(bindings::CrewSkill::Fighting as i32 as usize)
+                        .unwrap();
+                    ((bindings::CrewSkill::Fighting.bonus(if skill.first == skill.second {
+                        3
+                    } else if skill.first >= skill.second / 2 {
+                        2
+                    } else {
+                        1
+                    }) - 1.0)
+                        * 100.0
+                        * unsafe { crew.vtable().get_damage_multiplier(p_crew) })
+                        as u8
+                }),
+                movement_speed: Help::new(
+                    strings::SKILL_MOVEMENT,
+                    (100.0 * unsafe { crew.vtable().get_move_speed_multipler(p_crew) }) as u8,
+                ),
+                fire_immunity: Help::new(text("crew_rock_power_1"), !unsafe {
+                    crew.vtable().can_burn(p_crew)
+                }),
+                mind_control_immunity: Help::new(text("crew_slug_power_2"), unsafe {
+                    crew.vtable().is_telepathic(p_crew)
+                }),
+                telepathic_sensors: Help::new(text("crew_slug_power_1"), unsafe {
+                    crew.vtable().is_telepathic(p_crew)
+                }),
+                suffocation_resistance: Help::new(strings::SKILL_SUFFOCATION_RES, unsafe {
+                    (if crew.vtable().can_suffocate(p_crew) {
+                        1.0 - crew.vtable().get_suffocation_modifier(p_crew)
+                    } else {
+                        1.0
+                    }) * 100.0
+                }
+                    as u8),
+                drains_room_oxygen: Help::new(text("crew_anaerobic_power_1"), unsafe {
+                    crew.vtable().is_anaerobic(p_crew)
+                }),
+                can_lockdown_rooms: Help::new(strings::SKILL_LOCKDOWN, unsafe {
+                    crew.vtable().power_ready(p_crew)
+                }),
+                damage_on_death: Help::new(
+                    text("crew_energy_power_3"),
+                    (species == context::Species::Zoltan)
+                        .then_some(15)
+                        .unwrap_or_default(),
+                ),
+                powers_systems: Help::new(text("crew_energy_power_1"), unsafe {
+                    crew.vtable().provides_power(p_crew)
+                }),
+            }
+        },
+        health: crew.health.first as i32,
+        max_health: crew.health.second as i32,
+        fighting_fire: crew.i_on_fire > 0,
+        suffocating: crew.b_suffocating,
+        fighting: crew.b_fighting,
+        healing: crew.f_medbay > 0.0,
+        dead: crew.b_dead,
+        mind_controlled: crew.b_mind_controlled,
+        manning: crew
+            .b_active_manning
+            .then(|| {
+                unsafe { xc(crew.current_system) }.map(|system| {
+                    let sys = System::from_id(system.i_system_type).unwrap();
+                    let bp = sys.blueprint().unwrap();
+                    bp.title.to_str()
+                })
+            })
+            .flatten(),
+        repairing: (!crew.current_repair.is_null() && crew.current_ship_id == crew.i_ship_id).then(
+            || {
+                let repair = unsafe { xc(crew.current_repair).unwrap() };
+                let name = repair.name.to_str();
+                if let Some(sys) = System::from_name(&name) {
+                    sys.blueprint().unwrap().title.to_str()
+                } else if &name == "Fire" {
+                    "Fire"
+                } else if &name == "Algae" {
+                    // unused content
+                    "Algae"
+                } else if name.is_empty() {
+                    "Hull Breach"
+                } else {
+                    strings::BUG
+                }
+            },
+        ),
+        sabotaging: (!crew.current_repair.is_null() && crew.current_ship_id != crew.i_ship_id)
+            .then(|| {
+                let repair = unsafe { xc(crew.current_repair).unwrap() };
+                let name = repair.name.to_str();
+                if let Some(sys) = System::from_name(&name) {
+                    sys.blueprint().unwrap().title.to_str()
+                } else if &name == "Fire" {
+                    "Fire"
+                } else if name.is_empty() {
+                    "Hull Breach"
+                } else {
+                    "??? BUG IN THE MOD"
+                }
+            }),
+    }
+}
+
+fn crew_bp_desc<'a>(
+    crew: &'a bindings::CrewBlueprint,
+    map: &mut IdMap<'a>,
+    faction: ShipId,
+) -> context::CrewInfo {
+    let species = context::Species::from_id(&crew.name.to_str());
+    let max_hp = match species {
+        context::Species::BattleDrone | context::Species::Drone | context::Species::Rockman => 150,
+        context::Species::Crystal => 125,
+        context::Species::Zoltan => 70,
+        context::Species::RepairDrone => 25,
+        _ => 100,
+    };
+    context::CrewInfo {
+        name: map.map(crew.crew_name_long.to_str()).into_owned(),
+        // same as blueprint.name
+        species,
+        faction,
+        location: None,
+        bonuses: {
+            context::Skills {
+                piloting_evasion: Help::new(strings::SKILL_PILOTING, {
+                    let skill = crew
+                        .skill_level
+                        .get(bindings::CrewSkill::Piloting as i32 as usize)
+                        .unwrap();
+                    bindings::CrewSkill::Piloting.bonus(if skill.first == skill.second {
+                        3
+                    } else if skill.first >= skill.second / 2 {
+                        2
+                    } else {
+                        1
+                    }) as u8
+                }),
+                engines_evasion: Help::new(strings::SKILL_ENGINES, {
+                    let skill = crew
+                        .skill_level
+                        .get(bindings::CrewSkill::Engines as i32 as usize)
+                        .unwrap();
+                    bindings::CrewSkill::Engines.bonus(if skill.first == skill.second {
+                        3
+                    } else if skill.first >= skill.second / 2 {
+                        2
+                    } else {
+                        1
+                    }) as u8
+                }),
+                shields_recharge: Help::new(strings::SKILL_SHIELDS, {
+                    let skill = crew
+                        .skill_level
+                        .get(bindings::CrewSkill::Shields as i32 as usize)
+                        .unwrap();
+                    ((bindings::CrewSkill::Shields.bonus(if skill.first == skill.second {
+                        3
+                    } else if skill.first >= skill.second / 2 {
+                        2
+                    } else {
+                        1
+                    }) - 1.0)
+                        * 100.0) as u8
+                }),
+                weapons_recharge: Help::new(strings::SKILL_WEAPONS, {
+                    let skill = crew
+                        .skill_level
+                        .get(bindings::CrewSkill::Weapons as i32 as usize)
+                        .unwrap();
+                    ((1.0
+                        - bindings::CrewSkill::Weapons.bonus(if skill.first == skill.second {
+                            3
+                        } else if skill.first >= skill.second / 2 {
+                            2
+                        } else {
+                            1
+                        }))
+                        * 100.0) as u8
+                }),
+                repairing_speed: Help::new(strings::SKILL_REPAIRING, {
+                    let skill = crew
+                        .skill_level
+                        .get(bindings::CrewSkill::Repairing as i32 as usize)
+                        .unwrap();
+                    ((bindings::CrewSkill::Repairing.bonus(if skill.first == skill.second {
+                        3
+                    } else if skill.first >= skill.second / 2 {
+                        2
+                    } else {
+                        1
+                    }) - 1.0)
+                        * 100.0
+                        * match species {
+                            context::Species::RepairDrone | context::Species::Engi => 2.0,
+                            context::Species::Mantis => 0.5,
+                            _ => 1.0,
+                        }) as u8
+                }),
+                fighting_strength: Help::new(strings::SKILL_FIGHTING, {
+                    let skill = crew
+                        .skill_level
+                        .get(bindings::CrewSkill::Fighting as i32 as usize)
+                        .unwrap();
+                    ((bindings::CrewSkill::Fighting.bonus(if skill.first == skill.second {
+                        3
+                    } else if skill.first >= skill.second / 2 {
+                        2
+                    } else {
+                        1
+                    }) - 1.0)
+                        * 100.0
+                        * match species {
+                            context::Species::BattleDrone => 1.2,
+                            context::Species::Mantis => 1.5,
+                            context::Species::Engi => 0.5,
+                            _ => 1.0,
+                        }) as u8
+                }),
+                movement_speed: Help::new(
+                    strings::SKILL_MOVEMENT,
+                    (100.0
+                        * match species {
+                            context::Species::Lanius => 0.85,
+                            context::Species::BattleDrone
+                            | context::Species::RepairDrone
+                            | context::Species::Drone => 0.5,
+                            context::Species::Crystal => 0.8,
+                            context::Species::Mantis => 1.2,
+                            context::Species::Rockman => 0.5,
+                            _ => 1.0,
+                        }) as u8,
+                ),
+                fire_immunity: Help::new(
+                    text("crew_rock_power_1"),
+                    matches!(
+                        species,
+                        context::Species::Rockman
+                            | context::Species::BattleDrone
+                            | context::Species::RepairDrone
+                            | context::Species::Drone
+                    ),
+                ),
+                mind_control_immunity: Help::new(
+                    text("crew_slug_power_2"),
+                    species == context::Species::Slug,
+                ),
+                telepathic_sensors: Help::new(
+                    text("crew_slug_power_1"),
+                    species == context::Species::Slug,
+                ),
+                suffocation_resistance: Help::new(
+                    strings::SKILL_SUFFOCATION_RES,
+                    (match species {
+                        context::Species::Lanius => 1.0,
+                        context::Species::BattleDrone
+                        | context::Species::RepairDrone
+                        | context::Species::Drone => 1.0,
+                        context::Species::Crystal => 0.5,
+                        _ => 0.0,
+                    } * 100.0) as u8,
+                ),
+                drains_room_oxygen: Help::new(
+                    text("crew_anaerobic_power_1"),
+                    species == context::Species::Lanius,
+                ),
+                can_lockdown_rooms: Help::new(
+                    strings::SKILL_LOCKDOWN,
+                    species == context::Species::Crystal,
+                ),
+                damage_on_death: Help::new(
+                    text("crew_energy_power_3"),
+                    (species == context::Species::Zoltan)
+                        .then_some(15)
+                        .unwrap_or_default(),
+                ),
+                powers_systems: Help::new(
+                    text("crew_energy_power_1"),
+                    species == context::Species::Zoltan,
+                ),
+            }
+        },
+        health: max_hp,
+        max_health: max_hp,
+        fighting_fire: false,
+        suffocating: false,
+        fighting: false,
+        healing: false,
+        dead: false,
+        mind_controlled: false,
+        manning: None,
+        repairing: None,
+        sabotaging: None,
+    }
+}
+
+fn drone_desc<'a>(drone: &'a bindings::Drone, map: &mut IdMap<'a>) -> context::DroneInfo {
+    let bp = drone.blueprint().unwrap();
+    let p_drone = ptr::addr_of!(*drone);
+    let faction = if drone.i_ship_id == 0 {
+        ShipId::Player
+    } else {
+        ShipId::Enemy
+    };
+    let (health, max_health, location, weapon) = match DroneType::from_id(bp.type_) {
+        Some(
+            DroneType::Defense
+            | DroneType::Combat
+            | DroneType::ShipRepair
+            | DroneType::Hacking
+            | DroneType::Shield,
+        ) => {
+            let drone = unsafe { &*p_drone.cast::<bindings::SpaceDrone>() };
+            (
+                None,
+                None,
+                None,
+                drone
+                    .weapon_blueprint()
+                    .map(|x| weapon_bp_desc(x, &mut IdMap::new(), faction)),
+            )
+        }
+        Some(DroneType::Repair | DroneType::Battle | DroneType::Boarder) => {
+            let drone = unsafe { &*p_drone.cast::<bindings::CrewDrone>() };
+            (
+                Some(drone.base.health.first as i32),
+                Some(drone.base.health.second as i32),
+                (drone.base.current_ship_id >= 0 && drone.base.i_room_id >= 0).then_some(
+                    context::Location {
+                        ship: if drone.base.current_ship_id == 0 {
+                            ShipId::Player
+                        } else {
+                            ShipId::Enemy
+                        },
+                        room_id: drone.base.i_room_id as u32,
+                    },
+                ),
+                None,
+            )
+        }
+        None => (None, None, None, None),
+    };
+    context::DroneInfo {
+        name: map.map(bp.desc.title.to_str()).into_owned(),
+        description: bp.desc.description.to_str().into_owned(),
+        tooltip: bp.desc.tooltip.to_str().into_owned(),
+        tip: bp.desc.tip.to_str().into_owned(),
+        cost: bp.desc.cost,
+        rarity: bp.desc.rarity,
+        faction,
+        required_power: drone.required_power(),
+        deploying: drone.powered && !drone.deployed,
+        deployed: drone.deployed,
+        powered: drone.powered,
+        hacked: drone.i_hack_level > 1,
+        dead: drone.b_dead,
+        health,
+        max_health,
+        location,
+        weapon,
+    }
+}
+
+fn drone_bp_desc<'a>(
+    drone: &'a bindings::DroneBlueprint,
+    map: &mut IdMap<'a>,
+    faction: ShipId,
+) -> context::DroneInfo {
+    let max_health = match DroneType::from_id(drone.type_) {
+        Some(
+            DroneType::Defense
+            | DroneType::Combat
+            | DroneType::ShipRepair
+            | DroneType::Hacking
+            | DroneType::Shield,
+        ) => None,
+        Some(DroneType::Repair) => Some(25),
+        Some(DroneType::Battle | DroneType::Boarder) => Some(150),
+        None => None,
+    };
+    context::DroneInfo {
+        name: map.map(drone.desc.title.to_str()).into_owned(),
+        description: drone.desc.description.to_str().into_owned(),
+        tooltip: drone.desc.tooltip.to_str().into_owned(),
+        tip: drone.desc.tip.to_str().into_owned(),
+        cost: drone.desc.cost,
+        rarity: drone.desc.rarity,
+        faction,
+        required_power: drone.power,
+        deploying: false,
+        deployed: false,
+        powered: false,
+        hacked: false,
+        dead: false,
+        health: None,
+        max_health,
+        location: None,
+        weapon: None,
+    }
+}
+
+fn weapon_bp_desc<'a>(
+    weapon: &'a bindings::WeaponBlueprint,
+    map: &mut IdMap<'a>,
+    faction: ShipId,
+) -> context::WeaponInfo {
+    context::WeaponInfo {
+        name: map.map(weapon.desc.title.to_str()).into_owned(),
+        description: weapon.desc.description.to_str().into_owned(),
+        tooltip: weapon.desc.tooltip.to_str().into_owned(),
+        tip: weapon.desc.tip.to_str().into_owned(),
+        cost: weapon.desc.cost,
+        rarity: weapon.desc.rarity,
+        faction,
+        damage: (weapon.damage.i_damage > 0)
+            .then_some(weapon.damage.i_damage)
+            .unwrap_or_default(),
+        healing: (weapon.damage.i_damage < 0)
+            .then_some(weapon.damage.i_damage)
+            .unwrap_or_default(),
+        missiles_per_shot: weapon.missiles,
+        shield_piercing: weapon.damage.i_shield_piercing,
+        fire_chance_percentage: weapon.damage.fire_chance,
+        breach_chance_percentage: weapon.damage.breach_chance,
+        stun_chance_percentage: weapon.damage.stun_chance,
+        stun_duration: weapon.damage.i_stun,
+        ion_damage: weapon.damage.i_ion_damage,
+        system_damage: weapon.damage.i_system_damage,
+        crew_damage: weapon.damage.i_pers_damage * 15,
+        hull_damage: weapon
+            .damage
+            .b_hull_buster
+            .then(|| weapon.damage.i_damage * 2)
+            .unwrap_or_default(),
+        lockdowns_room: weapon.damage.b_lockdown,
+        can_target_own_ship: weapon.can_target_self(),
+        projectile_speed: weapon.speed as i32,
+        cooldown: weapon.cooldown as i32,
+        required_power: weapon.power,
+        powered: None,
+        hacked: false,
+    }
+}
+
+fn weapon_desc<'a>(
+    weapon: &'a bindings::ProjectileFactory,
+    map: &mut IdMap<'a>,
+) -> context::WeaponInfo {
+    let bp = weapon.blueprint().unwrap();
+    context::WeaponInfo {
+        name: map.map(bp.desc.title.to_str()).into_owned(),
+        description: bp.desc.description.to_str().into_owned(),
+        tooltip: bp.desc.tooltip.to_str().into_owned(),
+        tip: bp.desc.tip.to_str().into_owned(),
+        cost: bp.desc.cost,
+        rarity: bp.desc.rarity,
+        faction: if weapon.i_ship_id == 0 {
+            ShipId::Player
+        } else {
+            ShipId::Enemy
+        },
+        damage: (bp.damage.i_damage > 0)
+            .then_some(bp.damage.i_damage)
+            .unwrap_or_default(),
+        healing: (bp.damage.i_damage < 0)
+            .then_some(bp.damage.i_damage)
+            .unwrap_or_default(),
+        missiles_per_shot: bp.missiles,
+        shield_piercing: bp.damage.i_shield_piercing,
+        fire_chance_percentage: bp.damage.fire_chance,
+        breach_chance_percentage: bp.damage.breach_chance,
+        stun_chance_percentage: bp.damage.stun_chance,
+        stun_duration: bp.damage.i_stun,
+        ion_damage: bp.damage.i_ion_damage,
+        system_damage: bp.damage.i_system_damage,
+        crew_damage: bp.damage.i_pers_damage * 15,
+        hull_damage: bp
+            .damage
+            .b_hull_buster
+            .then(|| bp.damage.i_damage * 2)
+            .unwrap_or_default(),
+        lockdowns_room: bp.damage.b_lockdown,
+        can_target_own_ship: bp.can_target_self(),
+        projectile_speed: bp.speed as i32,
+        cooldown: bp.cooldown as i32,
+        required_power: weapon.required_power(),
+        powered: Some(weapon.powered),
+        hacked: weapon.i_hack_level > 1,
+    }
+}
+
+fn system_levels(
+    sys: System,
+    upgrade_cost: &[c_int],
+    power: c_int,
+    level: c_int,
+) -> Vec<context::SystemLevel> {
+    let descs = match sys {
+        System::Shields => vec![
+            None,
+            Some(Cow::Borrowed(text("shields_0"))),
+            None,
+            Some(Cow::Borrowed(text("shields_1"))),
+            None,
+            Some(Cow::Borrowed(text("shields_2"))),
+            None,
+            Some(Cow::Borrowed(text("shields_3"))),
+        ],
+        System::Engines => {
+            let desc = text("engine");
+            [5, 10, 15, 20, 25, 28, 31, 35]
+                .into_iter()
+                .enumerate()
+                .map(|(i, x)| {
+                    let y = (i + 4) as f32 * 0.25;
+                    Some(Cow::Owned(desc.replace("\\1", &x.to_string()).replace(
+                        "\\2",
+                        y.to_string().trim_end_matches('0').trim_end_matches('.'),
+                    )))
+                })
+                .collect()
+        }
+        System::Oxygen => {
+            let desc = text("oxygen_on");
+            (0..3)
+                .map(|i| {
+                    let x = 1.max(i * 3);
+                    Some(Cow::Owned(desc.replace("\\1", &x.to_string())))
+                })
+                .collect()
+        }
+        System::Weapons => {
+            let desc = text("system_power");
+            (0..8).map(|_| Some(Cow::Borrowed(desc))).collect()
+        }
+        System::Drones => {
+            let desc = text("system_power");
+            (0..8).map(|_| Some(Cow::Borrowed(desc))).collect()
+        }
+        System::Medbay => {
+            let desc = text("medbay_healing");
+            [1.0, 1.5, 3.0]
+                .map(|x| {
+                    Some(Cow::Owned(desc.replace(
+                        "\\1",
+                        x.to_string().trim_end_matches('0').trim_end_matches('.'),
+                    )))
+                })
+                .to_vec()
+        }
+        System::Pilot => vec![
+            Some(Cow::Borrowed(text("pilot_1"))),
+            Some(Cow::Borrowed(text("pilot_2"))),
+            Some(Cow::Borrowed(text("pilot_3"))),
+        ],
+        System::Sensors => vec![
+            Some(Cow::Borrowed(text("sensor_1"))),
+            Some(Cow::Borrowed(text("sensor_2"))),
+            Some(Cow::Borrowed(text("sensor_3"))),
+            Some(Cow::Borrowed(text("sensor_4"))),
+        ],
+        System::Doors => vec![
+            Some(Cow::Borrowed(text("door_1"))),
+            Some(Cow::Borrowed(text("door_2"))),
+            Some(Cow::Borrowed(text("door_3"))),
+            Some(Cow::Borrowed(text("door_4"))),
+        ],
+        System::Teleporter => {
+            let desc = text("teleporter_on");
+            [20, 15, 10]
+                .map(|x| Some(Cow::Owned(desc.replace("\\1", &x.to_string()))))
+                .to_vec()
+        }
+        System::Cloaking => {
+            let desc = text("cloak");
+            (0..3)
+                .map(|i| Some(Cow::Owned(desc.replace("\\1", &(5 * (i + 1)).to_string()))))
+                .collect()
+        }
+        System::Artillery => vec![
+            Some(Cow::Borrowed(text("artillery_1"))),
+            Some(Cow::Borrowed(text("artillery_2"))),
+            Some(Cow::Borrowed(text("artillery_3"))),
+            Some(Cow::Borrowed(text("artillery_4"))),
+        ],
+        System::Battery => {
+            let desc = text("battery_power");
+            (0..2)
+                .map(|i| Some(Cow::Owned(desc.replace("\\1", &(2 * (i + 1)).to_string()))))
+                .collect()
+        }
+        System::Clonebay => {
+            let desc = text("clone_full");
+            [(8, 12), (16, 9), (25, 7)]
+                .map(|(hp, sec)| {
+                    Some(Cow::Owned(
+                        desc.replace("\\1", &sec.to_string())
+                            .replace("\\2", &hp.to_string()),
+                    ))
+                })
+                .to_vec()
+        }
+        System::Mind => vec![
+            Some(Cow::Borrowed(text("mind_1"))),
+            Some(Cow::Borrowed(text("mind_2"))),
+            Some(Cow::Borrowed(text("mind_3"))),
+        ],
+        System::Hacking => {
+            let desc = text("hacking_duration");
+            [4, 7, 10]
+                .map(|sec| Some(Cow::Owned(desc.replace("\\1", &sec.to_string()))))
+                .to_vec()
+        }
+        _ => unreachable!(),
+    };
+    let mut costs = upgrade_cost.iter().copied();
+    descs
+        .into_iter()
+        .enumerate()
+        .map(|(i, desc)| SystemLevel {
+            effect: desc,
+            level: i + 1,
+            cost: costs.next().unwrap_or_default(),
+            purchased: level > i as i32,
+            active: power > i as i32,
+        })
+        .collect()
+}
+
+fn system_desc(system: &bindings::ShipSystem, map: &mut IdMap<'static>) -> context::SystemInfo {
+    let sys = System::from_id(system.i_system_type).unwrap();
+    let bp = sys.blueprint().unwrap();
+    let levels: Vec<_> = system_levels(
+        sys,
+        &bp.upgrade_cost.levels,
+        system.effective_power(),
+        system.power_state.second,
+    );
+    let reactor = reactor_state(system.i_ship_id);
+    context::SystemInfo {
+        faction: if system.i_ship_id == 0 {
+            ShipId::Player
+        } else {
+            ShipId::Enemy
+        },
+        cost: bp.cost as i32,
+        rarity: bp.rarity as i32,
+        room_id: system.room_id.try_into().ok(),
+        name: map.map(bp.title.to_str().into()),
+        description: bp.desc.to_str().into(),
+        tooltip: (sys != System::Artillery).then(|| sys.tooltip(system.i_ship_id != 0)),
+        hp: Some(system.health_state.first),
+        max_hp: Some(system.health_state.second),
+        can_be_manned: Some(system.b_boostable),
+        current_manned_bonus: (system.i_active_manned > 0).then(|| match sys {
+            System::Shields => text("shield_skill")
+                .replace(
+                    "\\1",
+                    &(((bindings::CrewSkill::Shields.bonus(system.i_active_manned) - 1.0) * 100.0)
+                        .round() as i32)
+                        .to_string(),
+                )
+                .into(),
+            System::Engines => text("engine_skill")
+                .replace(
+                    "\\1",
+                    &(bindings::CrewSkill::Engines
+                        .bonus(system.i_active_manned)
+                        .round() as i32)
+                        .to_string(),
+                )
+                .into(),
+            System::Weapons => text("weapon_skill")
+                .replace(
+                    "\\1",
+                    &(((1.0 - bindings::CrewSkill::Weapons.bonus(system.i_active_manned)) * 100.0)
+                        .round() as i32)
+                        .to_string(),
+                )
+                .into(),
+            System::Pilot => text("pilot_skill")
+                .replace(
+                    "\\1",
+                    &(bindings::CrewSkill::Piloting
+                        .bonus(system.i_active_manned)
+                        .round() as i32)
+                        .to_string(),
+                )
+                .into(),
+            System::Sensors | System::Doors => text("subsystem_manned").into(),
+            _ => "".into(),
+        }),
+        power: Some(system.effective_power()),
+        max_power: Some(system.max_power()),
+        max_level: bp.max_power as i32,
+        levels,
+        active: Some(system.functioning()),
+        level: system.power_state.second,
+        on_cooldown: match sys {
+            System::Battery
+            | System::Mind
+            | System::Clonebay
+            | System::Hacking
+            | System::Artillery
+            | System::Cloaking => Some(system.locked_prime()),
+            _ if system.locked_prime() => Some(true),
+            _ => None,
+        },
+        hacked: system.hacked(),
+        on_fire: system.b_on_fire,
+        breached: system.b_breached,
+        being_damaged: system.damaged_last_frame,
+        being_repaired: system.repaired_last_frame,
+        evasion_bonus: if sys == System::Engines {
+            let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::EngineSystem>() };
+            Some(system.dodge_factor())
+        } else if sys == System::Pilot {
+            let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::ShipSystem>() };
+            Some(bindings::CrewSkill::Piloting.bonus(system.manned_boost()) as i32)
+        } else {
+            None
+        },
+        weapon_names: (sys == System::Weapons)
+            .then(|| {
+                let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::WeaponSystem>() };
+                system
+                    .weapons
+                    .iter()
+                    .map(|x| {
+                        unsafe { xc(*x).unwrap() }
+                            .blueprint()
+                            .unwrap()
+                            .desc
+                            .title
+                            .to_str()
+                            .into_owned()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        drone_names: (sys == System::Drones)
+            .then(|| {
+                let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::DroneSystem>() };
+                system
+                    .drones
+                    .iter()
+                    .map(|x| {
+                        unsafe { xc(*x).unwrap() }
+                            .blueprint()
+                            .unwrap()
+                            .desc
+                            .title
+                            .to_str()
+                            .into_owned()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        shields: (sys == System::Shields).then(|| {
+            let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::Shields>() };
+            system.shields.power.first
+        }),
+        max_shields: (sys == System::Shields).then(|| {
+            let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::Shields>() };
+            system.shields.power.second
+        }),
+        super_shields: (sys == System::Shields).then(|| {
+            let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::Shields>() };
+            system.shields.power.super_.first
+        }),
+        max_super_shields: (sys == System::Shields).then(|| {
+            let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::Shields>() };
+            system.shields.power.super_.second
+        }),
+        hacking_in_progress: (sys == System::Hacking)
+            .then(|| {
+                let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::HackingSystem>() };
+                !system.drone.arrived
+                    && !system.drone.base.base.b_dead
+                    && system.drone.base.base.powered
+            })
+            .unwrap_or_default(),
+        hacking_allowed: (sys == System::Hacking)
+            .then(|| {
+                let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::HackingSystem>() };
+                system.drone.arrived
+            })
+            .unwrap_or_default(),
+        hacking_drone_system: (sys == System::Hacking)
+            .then(|| {
+                let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::HackingSystem>() };
+                system
+                    .current_system()
+                    .and_then(|x| System::from_id(x.i_system_type))
+                    .and_then(|x| x.blueprint())
+                    .map(|x| x.title.to_str())
+            })
+            .flatten(),
+        battery_power: (sys == System::Battery)
+            .then(|| reactor.map(|x| x.max_battery_power))
+            .flatten(),
+        max_battery_power: (sys == System::Battery)
+            .then(|| system.effective_power() * 2)
+            .unwrap_or_default(),
+        ship_oxygen_level: (sys == System::Oxygen).then(|| {
+            let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::OxygenSystem>() };
+            (system.f_total_oxygen * system.max_oxygen).round() as i32
+        }),
+        ship_max_oxygen_level: (sys == System::Oxygen).then(|| {
+            let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::OxygenSystem>() };
+            system.max_oxygen.round() as i32
+        }),
+        artillery_weapon: (sys == System::Artillery).then(|| {
+            let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::ArtillerySystem>() };
+            weapon_desc(
+                unsafe { xc(system.projectile_factory).unwrap() },
+                &mut IdMap::new(),
+            )
+        }),
+    }
+}
+
+fn system_bp_desc<'a>(
+    system: &'a bindings::SystemBlueprint,
+    map: &mut IdMap<'a>,
+    faction: ShipId,
+    drone_choice: c_int,
+) -> context::SystemInfo {
+    let sys = System::from_id(system.type_).unwrap();
+    let levels: Vec<_> = system_levels(sys, system.upgrade_costs.as_slice(), 0, system.start_power);
+    context::SystemInfo {
+        faction,
+        cost: system.desc.cost,
+        rarity: system.desc.rarity,
+        room_id: None,
+        name: map.map(system.desc.title.to_str()).into_owned().into(),
+        description: system.desc.description.to_str().into_owned().into(),
+        tooltip: (sys != System::Artillery).then(|| sys.tooltip(faction == ShipId::Enemy)),
+        hp: None,
+        max_hp: None,
+        can_be_manned: None,
+        current_manned_bonus: None,
+        power: None,
+        max_power: None,
+        max_level: system.max_power,
+        levels,
+        active: None,
+        level: system.start_power,
+        on_cooldown: None,
+        hacked: false,
+        on_fire: false,
+        breached: false,
+        being_damaged: false,
+        being_repaired: false,
+        evasion_bonus: None,
+        weapon_names: vec![],
+        drone_names: (sys == System::Drones)
+            .then(|| {
+                let name = match drone_choice {
+                    1 => "REPAIR",
+                    2 => "COMBAT_1",
+                    3 => "DEFENSE_1",
+                    _ => return None,
+                };
+                let Some(crate::Blueprint::Drone(bp)) = crate::library().blueprints.get(name)
+                else {
+                    log::error!("drone blueprint {name} not found");
+                    return None;
+                };
+                Some(vec![bp.title.to_str().to_owned()])
+            })
+            .flatten()
+            .unwrap_or_default(),
+        shields: (sys == System::Shields).then(|| {
+            let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::Shields>() };
+            system.shields.power.first
+        }),
+        max_shields: (sys == System::Shields).then(|| {
+            let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::Shields>() };
+            system.shields.power.second
+        }),
+        super_shields: (sys == System::Shields).then(|| {
+            let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::Shields>() };
+            system.shields.power.super_.first
+        }),
+        max_super_shields: (sys == System::Shields).then(|| {
+            let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::Shields>() };
+            system.shields.power.super_.second
+        }),
+        hacking_in_progress: (sys == System::Hacking)
+            .then(|| {
+                let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::HackingSystem>() };
+                !system.drone.arrived
+                    && !system.drone.base.base.b_dead
+                    && system.drone.base.base.powered
+            })
+            .unwrap_or_default(),
+        hacking_allowed: (sys == System::Hacking)
+            .then(|| {
+                let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::HackingSystem>() };
+                system.drone.arrived
+            })
+            .unwrap_or_default(),
+        hacking_drone_system: (sys == System::Hacking)
+            .then(|| {
+                let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::HackingSystem>() };
+                system
+                    .current_system()
+                    .and_then(|x| System::from_id(x.i_system_type))
+                    .and_then(|x| x.blueprint())
+                    .map(|x| x.title.to_str())
+            })
+            .flatten(),
+        battery_power: None,
+        max_battery_power: (sys == System::Battery)
+            .then(|| system.start_power * 2)
+            .unwrap_or_default(),
+        ship_oxygen_level: None,
+        ship_max_oxygen_level: None,
+        artillery_weapon: None,
+    }
+}
+
+fn augment_bp1_desc(
+    aug: &'static crate::xml::AugBlueprint,
+    map: &mut IdMap<'static>,
+) -> context::AugmentInfo {
+    context::AugmentInfo {
+        name: map.map(aug.title.to_str().into()).into_owned(),
+        description: aug.desc.to_str().to_owned(),
+        cost: aug.cost as i32,
+        rarity: aug.rarity as i32,
+    }
+}
+
+fn augment_bp_desc(
+    aug: &'static bindings::AugmentBlueprint,
+    map: &mut IdMap<'static>,
+) -> context::AugmentInfo {
+    context::AugmentInfo {
+        name: map.map(aug.desc.title.to_str()).into_owned(),
+        description: aug.desc.description.to_str().into_owned(),
+        cost: aug.desc.cost,
+        rarity: aug.desc.rarity,
+    }
+}
+
+fn item_bp_desc(item: &bindings::ItemBlueprint) -> context::ItemInfo {
+    context::ItemInfo {
+        name: item.base.desc.title.to_str().into_owned(),
+        description: item.base.desc.description.to_str().into_owned(),
+        cost: item.base.desc.cost,
+        rarity: item.base.desc.rarity,
+    }
+}
+
+fn repair_bp_desc(repair_all: bool, cost: i32) -> context::RepairInfo {
+    context::RepairInfo {
+        name: if repair_all {
+            text("repair_all_title")
+        } else {
+            text("repair_one_title")
+        },
+        description: if repair_all {
+            text("repair_all_desc")
+        } else {
+            text("repair_one_desc")
+        },
+        cost,
+    }
+}
+
+fn ship_manager_desc(
+    mgr: &bindings::ShipManager,
+    eq: Option<&bindings::Equipment>,
+) -> context::ShipInfo {
+    let doors_short: Vec<Vec<context::DoorInfoShort>> = mgr
+        .ship
+        .v_door_list
+        .iter()
+        .flat_map(|x| {
+            let door = unsafe { xc(*x).unwrap() };
+            [
+                (
+                    door.i_room2,
+                    context::DoorInfoShort {
+                        room_id: door.i_room1,
+                        door_id: door.i_door_id,
+                    },
+                ),
+                (
+                    door.i_room1,
+                    context::DoorInfoShort {
+                        room_id: door.i_room2,
+                        door_id: door.i_door_id,
+                    },
+                ),
+            ]
+        })
+        .fold(Vec::<Vec<_>>::new(), |mut ret, (room, door)| {
+            if let Ok(idx) = usize::try_from(room) {
+                if idx >= ret.len() {
+                    ret.resize(idx + 1, vec![]);
+                }
+                ret.get_mut(idx).unwrap().push(door);
+            }
+            ret
+        });
+    let crew_short = IdMap::with(|map| {
+        mgr.v_crew_list
+            .iter()
+            .filter_map(|x| {
+                let crew = unsafe { xc(*x).unwrap() };
+                (crew.current_ship_id == crew.i_ship_id).then(|| {
+                    (
+                        crew.i_room_id,
+                        map.map(crew.blueprint.crew_name_long.to_str()).into_owned(),
+                    )
+                })
+            })
+            .fold(Vec::<Vec<_>>::new(), |mut ret, (room, crew)| {
+                if let Ok(idx) = usize::try_from(room) {
+                    if idx >= ret.len() {
+                        ret.resize(idx + 1, vec![]);
+                    }
+                    ret.get_mut(idx).unwrap().push(crew);
+                }
+                ret
+            })
+    });
+    let intruders_short = mgr
+        .current_target()
+        .map(|x| {
+            IdMap::with(|map| {
+                x.v_crew_list
+                    .iter()
+                    .filter_map(|x| {
+                        let crew = unsafe { xc(*x).unwrap() };
+                        (crew.current_ship_id != crew.i_ship_id).then(|| {
+                            (
+                                crew.i_room_id,
+                                map.map(crew.blueprint.crew_name_long.to_str()).into_owned(),
+                            )
+                        })
+                    })
+                    .fold(Vec::<Vec<_>>::new(), |mut ret, (room, crew)| {
+                        if let Ok(idx) = usize::try_from(room) {
+                            if idx >= ret.len() {
+                                ret.resize(idx + 1, vec![]);
+                            }
+                            ret.get_mut(idx).unwrap().push(crew);
+                        }
+                        ret
+                    })
+            })
+        })
+        .unwrap_or_default();
+    context::ShipInfo {
+        destroyed: mgr.b_destroyed,
+        hull: Help::new(text("tooltip_hull"), mgr.ship.hull_integrity.first),
+        max_hull: mgr.ship.hull_integrity.second,
+        evasion_chance_percentage: mgr.dodge_factor(),
+        ship_name: mgr.ship.ship_name.to_str().into_owned(),
+        reactor: reactor_state(mgr.i_ship_id),
+        faction: if mgr.i_ship_id == 0 {
+            ShipId::Player
+        } else {
+            ShipId::Enemy
+        },
+        rooms: mgr
+            .ship
+            .v_room_list
+            .iter()
+            .map(|x| {
+                let room = unsafe { xc(*x).unwrap() };
+                room_desc(room, mgr, &doors_short, &crew_short, &intruders_short)
+            })
+            .collect(),
+        doors: mgr
+            .ship
+            .v_door_list
+            .iter()
+            .map(|x| {
+                let door = unsafe { xc(*x).unwrap() };
+                door_desc(door)
+            })
+            .collect(),
+        crew: IdMap::with(|map| {
+            mgr.v_crew_list
+                .iter()
+                .map(|x| {
+                    let crew = unsafe { xc(*x).unwrap() };
+                    crew_desc(crew, map)
+                })
+                .collect()
+        }),
+        drones: mgr
+            .drone_system()
+            .map(|x| {
+                let mut drones: Vec<_> = IdMap::with(|map| {
+                    x.drones
+                        .iter()
+                        .enumerate()
+                        .map(|(i, x)| {
+                            context::ItemSlot::new1(
+                                context::InventorySlotType::Drone,
+                                i + 1,
+                                drone_desc(unsafe { xc(*x).unwrap() }, map),
+                            )
+                        })
+                        .collect()
+                });
+                while drones.len() < x.slot_count as usize {
+                    drones.push(context::ItemSlot::new(
+                        context::InventorySlotType::Drone,
+                        drones.len() + 1,
+                    ));
+                }
+                drones
+            })
+            .unwrap_or_default(),
+        weapons: mgr
+            .weapon_system()
+            .map(|x| {
+                let mut weapons: Vec<_> = IdMap::with(|map| {
+                    x.weapons
+                        .iter()
+                        .enumerate()
+                        .map(|(i, x)| {
+                            context::ItemSlot::new1(
+                                context::InventorySlotType::Weapon,
+                                i + 1,
+                                weapon_desc(unsafe { xc(*x).unwrap() }, map),
+                            )
+                        })
+                        .collect()
+                });
+                while weapons.len() < x.slot_count as usize {
+                    weapons.push(context::ItemSlot::new(
+                        context::InventorySlotType::Weapon,
+                        weapons.len() + 1,
+                    ));
+                }
+                weapons
+            })
+            .unwrap_or_default(),
+        systems: IdMap::with(|map| {
+            mgr.v_system_list
+                .iter()
+                .map(|x| {
+                    let system = unsafe { xc(*x).unwrap() };
+                    system_desc(system, map)
+                })
+                .collect()
+        }),
+        augments: if let Some(eq) = eq {
+            IdMap::with(|map| {
+                eq.boxes::<bindings::AugmentEquipBox>()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, x)| context::ItemSlot {
+                        r#type: context::InventorySlotType::Augmentation,
+                        index: i,
+                        contents: unsafe { xc(x.cast::<bindings::AugmentEquipBox>()) }
+                            .and_then(|x| x.base.item.augment())
+                            .map(|x| augment_bp_desc(x, map)),
+                    })
+                    .collect()
+            })
+        } else {
+            IdMap::with(|map| {
+                let mut augs: Vec<_> = mgr
+                    .my_blueprint
+                    .augments
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, x)| {
+                        let bp = x.to_str();
+                        let Some(crate::Blueprint::Augment(bp)) =
+                            crate::library().blueprints.get(bp.as_ref())
+                        else {
+                            log::error!("augment blueprint {bp} not found");
+                            return None;
+                        };
+                        Some(context::ItemSlot {
+                            r#type: context::InventorySlotType::Augmentation,
+                            index: i,
+                            contents: Some(augment_bp1_desc(bp, map)),
+                        })
+                    })
+                    .collect();
+                while augs.len() < 3 {
+                    augs.push(context::ItemSlot::new(
+                        context::InventorySlotType::Augmentation,
+                        augs.len(),
+                    ));
+                }
+                augs
+            })
+        },
+    }
+}
+
+/*fn locations(s: &bindings::StarMap) -> Vec<context::LocationInfo> {
+
+}
+
+fn sectors(s: &bindings::StarMap) -> Vec<context::SectorInfo> {
+
+}*/
+
+fn collect_context(app: &CApp) -> context::Context {
+    if app.lang_chooser.base.b_open {
+        return Default::default();
+    }
+    if !app.game_logic {
+        return Default::default();
+    }
+    if app.menu.b_open {
+        if app.menu.b_credit_screen {
+            return context::Context {
+                in_credits: true,
+                ..Default::default()
+            };
+        }
+        if app.menu.ship_builder.b_open {
+            let b = &app.menu.ship_builder;
+            let s = b.ship_manager().unwrap();
+            return context::Context {
+                available_ships: app
+                    .menu
+                    .ship_builder
+                    .ships
+                    .into_iter()
+                    .enumerate()
+                    .flat_map(|(i, x)| {
+                        x.into_iter().enumerate().filter_map(move |(j, x)| {
+                            let unlocked = unsafe {
+                                (**(*crate::ACHIEVEMENTS.0)
+                                    .ship_unlocks
+                                    .get(i)
+                                    .unwrap()
+                                    .get(j)
+                                    .unwrap())
+                                .unlocked
+                            };
+                            let bp = unsafe { xb(x) }?;
+                            Some(context::ShipDesc {
+                                name: bp.desc.title.to_str().into_owned(),
+                                class: bp.ship_class.to_str().into_owned(),
+                                description: bp.desc.description.to_str().into_owned(),
+                                layout_id: i,
+                                layout_variation_id: j,
+                                unlocked,
+                                unlock_condition: (!unlocked)
+                                    .then(|| bp.unlock.to_str().into_owned()),
+                            })
+                        })
+                    })
+                    .collect(),
+                selected_ship: (app.menu.ship_builder.current_ship_id >= 0
+                    && app.menu.ship_builder.current_type >= 0)
+                    .then(|| {
+                        let bp = app.menu.ship_builder.ships
+                            [app.menu.ship_builder.current_ship_id as usize]
+                            [app.menu.ship_builder.current_type as usize];
+                        let bp = unsafe { xb(bp).unwrap() };
+                        context::ShipDesc {
+                            name: bp.desc.title.to_str().into_owned(),
+                            class: bp.ship_class.to_str().into_owned(),
+                            description: bp.desc.description.to_str().into_owned(),
+                            layout_id: app.menu.ship_builder.current_ship_id as usize,
+                            layout_variation_id: app.menu.ship_builder.current_type as usize,
+                            unlocked: false,
+                            unlock_condition: None,
+                        }
+                    }),
+                player_ship: Some(context::ShipInfo {
+                    ship_name: app.menu.ship_builder.current_name.to_str().into_owned(),
+                    destroyed: false,
+                    crew: IdMap::with(|map| {
+                        app.menu
+                            .ship_builder
+                            .v_crew_boxes
+                            .iter()
+                            .filter_map(|x| {
+                                let x = unsafe { xc(*x).unwrap() };
+                                let crew = x.base.base.item.crew()?;
+                                Some(crew_desc(crew, map))
+                            })
+                            .collect()
+                    }),
+                    ..ship_manager_desc(s, None)
+                }),
+                enemy_ship: None,
+                ..Default::default()
+            };
+        }
+        if app.menu.b_select_save {
+            return context::Context {
+                in_main_menu: true,
+                can_continue_saved_game: app.menu.continue_button.base.b_active,
+                confirmation_message: app.menu.confirm_new_game.text.to_str().into_owned(),
+                ..Default::default()
+            };
+        }
+        return context::Context {
+            in_main_menu: true,
+            can_continue_saved_game: app.menu.continue_button.base.b_active,
+            ..Default::default()
+        };
+    }
+    let gui = app.gui().unwrap();
+    if gui.game_over_screen.base.b_open {
+        return context::Context {
+            game_over: gui.game_over_screen.gameover_text.to_str().into_owned(),
+            victory: Some(gui.game_over_screen.b_victory),
+            in_credits: gui.game_over_screen.b_showing_credits,
+            ..Default::default()
+        };
+    }
+    let mut confirmation_message = String::new();
+    if gui.leave_crew_dialog.base.b_open {
+        confirmation_message = gui.leave_crew_dialog.text.to_str().into_owned();
+    }
+    if gui.ship_screens.base.b_open
+        && gui.crew_screen.base.b_open
+        && gui.crew_screen.delete_dialog.base.b_open
+    {
+        confirmation_message = gui.crew_screen.delete_dialog.text.to_str().into_owned();
+    }
+    let mut event_text = String::new();
+    let mut event_options = vec![];
+    if gui.choice_box.base.b_open {
+        let c = &gui.choice_box;
+        event_text = "Current event:\n".to_owned()
+            + &c.main_text.to_str()
+            + &resource_event_str(&c.rewards, gui.ship_manager().unwrap());
+        event_options = c
+            .choices
+            .iter()
+            .enumerate()
+            .map(|(i, choice)| {
+                format!(
+                    "Event option {}{}\n\n{}{}",
+                    i + 1,
+                    match choice.type_ {
+                        1 => " (Requirements not met, cannot be chosen)",
+                        2 => " (Requirements met)",
+                        _ => " (No requirements)",
+                    },
+                    choice.text.to_str(),
+                    resource_event_str(&choice.rewards, gui.ship_manager().unwrap())
+                )
+            })
+            .collect();
+    }
+    if gui.star_map().unwrap().base.b_open {}
+    let mgr = gui.ship_manager().unwrap();
+    context::Context {
+        confirmation_message,
+        available_ships: vec![],
+        can_continue_saved_game: false,
+        in_credits: false,
+        in_main_menu: false,
+        in_new_game_config: false,
+        game_over: String::new(),
+        /*locations: gui.star_map().is_some_and(|x| x.base.b_open).then(|| {
+            let s = gui.star_map().unwrap();
+            locations(s)
+        }),
+        sectors: gui
+            .star_map()
+            .is_some_and(|x| x.base.b_open && x.b_choosing_new_sector)
+            .then(|| {
+                let s = gui.star_map().unwrap();
+                sectors(s)
+            }),*/
+        selected_ship: None,
+        victory: None,
+        event_text,
+        event_options,
+        current_store_page: gui
+            .store_screens
+            .base
+            .b_open
+            .then(|| {
+                let store = app
+                    .world()
+                    .unwrap()
+                    .base_location_event()
+                    .unwrap()
+                    .store()
+                    .unwrap();
+                store.base.b_open.then(|| {
+                    let cnt = store.section_count;
+                    let start = (if store.b_show_page2 { 2 } else { 0 }).min(cnt);
+                    let end = (start + 2).min(cnt);
+                    let mut page = context::StoreItems::default();
+                    for i in
+                        ((start * 3)..(end * 3)).chain((end * 3)..store.v_store_boxes.len() as i32)
+                    {
+                        let t = if i < end * 3 {
+                            bindings::StoreType::from_id(store.types[i as usize / 3])
+                        } else if i >= store.section_count * 3 + 3 {
+                            bindings::StoreType::None
+                        } else {
+                            bindings::StoreType::Items
+                        };
+                        let b = store.v_store_boxes.get(i as usize).unwrap();
+                        match t {
+                            bindings::StoreType::Crew => {
+                                let b = unsafe { xc(b.cast::<bindings::CrewStoreBox>()).unwrap() };
+                                page.crew.push(crew_bp_desc(
+                                    b.blueprint(),
+                                    &mut IdMap::new(),
+                                    ShipId::Player,
+                                ));
+                            }
+                            bindings::StoreType::Weapons => {
+                                let b =
+                                    unsafe { xc(b.cast::<bindings::WeaponStoreBox>()).unwrap() };
+                                page.weapons.push(weapon_bp_desc(
+                                    b.blueprint().unwrap(),
+                                    &mut IdMap::new(),
+                                    ShipId::Player,
+                                ));
+                            }
+                            bindings::StoreType::Drones => {
+                                let b = unsafe { xc(b.cast::<bindings::DroneStoreBox>()).unwrap() };
+                                page.drones.push(drone_bp_desc(
+                                    b.blueprint().unwrap(),
+                                    &mut IdMap::new(),
+                                    ShipId::Player,
+                                ));
+                            }
+                            bindings::StoreType::Systems => {
+                                let b =
+                                    unsafe { xc(b.cast::<bindings::SystemStoreBox>()).unwrap() };
+                                page.systems.push(system_bp_desc(
+                                    b.blueprint().unwrap(),
+                                    &mut IdMap::new(),
+                                    ShipId::Player,
+                                    b.drone_choice,
+                                ));
+                            }
+                            bindings::StoreType::Augments => {
+                                let b =
+                                    unsafe { xc(b.cast::<bindings::AugmentStoreBox>()).unwrap() };
+                                page.augments.push(augment_bp_desc(
+                                    b.blueprint().unwrap(),
+                                    &mut IdMap::new(),
+                                ));
+                            }
+                            bindings::StoreType::Items => {
+                                let b = unsafe { xc(b.cast::<bindings::ItemStoreBox>()).unwrap() };
+                                page.items.push(item_bp_desc(b.blueprint().unwrap()));
+                            }
+                            bindings::StoreType::None => {
+                                let b =
+                                    unsafe { xc(b.cast::<bindings::RepairStoreBox>()).unwrap() };
+                                page.repair
+                                    .push(repair_bp_desc(b.repair_all, b.base.desc.cost));
+                            }
+                            bindings::StoreType::Total => {}
+                        }
+                    }
+                    page
+                })
+            })
+            .flatten(),
+        player_ship: Some(ship_manager_desc(mgr, None)),
+        enemy_ship: Some(ship_manager_desc(mgr.current_target().unwrap(), None)),
+        inventory: Some(context::Inventory {
+            drone_part_count: context::Help::new(text("tooltip_droneCount"), mgr.drone_count()),
+            fuel_count: context::Help::new(text("tooltip_fuelCount"), mgr.fuel_count),
+            missile_count: context::Help::new(text("tooltip_missileCount"), mgr.missile_count()),
+            scrap_count: context::Help::new(text("tooltip_scrapCount"), mgr.current_scrap),
+            overcapacity_slot: context::ItemSlot {
+                r#type: context::InventorySlotType::OverCapacity,
+                index: 0,
+                contents: gui
+                    .equip_screen
+                    .b_over_capacity
+                    .then(|| {
+                        unsafe { xc(gui.equip_screen.overcapacity_box) }.and_then(|b| {
+                            #[allow(clippy::manual_map)]
+                            if let Some(x) = b.item.weapon() {
+                                Some(context::AnyItemInfo::Weapon(weapon_desc(
+                                    x,
+                                    &mut IdMap::new(),
+                                )))
+                            } else if let Some(x) = b.item.drone() {
+                                Some(context::AnyItemInfo::Drone(drone_desc(
+                                    x,
+                                    &mut IdMap::new(),
+                                )))
+                            } else {
+                                None
+                            }
+                        })
+                    })
+                    .flatten(),
+            },
+            augment_overcapacity_slot: context::ItemSlot {
+                r#type: context::InventorySlotType::AugmentationOverCapacity,
+                index: 0,
+                contents: gui
+                    .equip_screen
+                    .b_over_aug_capacity
+                    .then(|| {
+                        unsafe { xc(gui.equip_screen.over_aug_box) }.and_then(|b| {
+                            b.base
+                                .item
+                                .augment()
+                                .map(|x| augment_bp_desc(x, &mut IdMap::new()))
+                        })
+                    })
+                    .flatten(),
+            },
+            cargo_slots: gui
+                .equip_screen
+                .boxes::<bindings::EquipmentBox>()
+                .into_iter()
+                .enumerate()
+                .map(|(i, b)| context::ItemSlot {
+                    r#type: context::InventorySlotType::Cargo,
+                    index: i,
+                    contents: unsafe { xc(b) }.and_then(|b| {
+                        #[allow(clippy::manual_map)]
+                        if let Some(x) = b.item.weapon() {
+                            Some(context::AnyItemInfo::Weapon(weapon_desc(
+                                x,
+                                &mut IdMap::new(),
+                            )))
+                        } else if let Some(x) = b.item.drone() {
+                            Some(context::AnyItemInfo::Drone(drone_desc(
+                                x,
+                                &mut IdMap::new(),
+                            )))
+                        } else {
+                            None
+                        }
+                    }),
+                })
+                .collect(),
+        }),
+    }
+}
+
 // useful to hook: WarningMessage::Start or smth
 // game_over.gameover_text, game_over.b_victory
 
 pub fn loop_hook2(app: &mut CApp) {
     // activated with `l`, very useful for testing
     unsafe {
-        (*super::SETTING_VALUES.0).command_console = true;
+        (*super::SETTINGS.0).command_console = true;
         GAME.get_or_init(|| {
             let (game2ws_tx, mut game2ws_rx) = mpsc::channel(128);
             let (ws2game_tx, ws2game_rx) = mpsc::channel(128);
@@ -3945,6 +5681,7 @@ pub fn loop_hook2(app: &mut CApp) {
                 rx: ws2game_rx,
                 app: ptr::null_mut(),
                 actions: ActionDb::default(),
+                buffer: None,
             };
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -4038,21 +5775,30 @@ pub fn loop_hook2(app: &mut CApp) {
     } else if changed || game.actions.force != actions.force {
         game.actions.force = actions.force;
     }
-    if let Some(ctx) = actions.action_context {
-        if !game
-            .actions
-            .action_context
-            .as_ref()
-            .is_some_and(|x| x == &ctx)
-        {
-            if let Err(err) = game.context(ctx.0.clone(), ctx.1) {
-                log::error!("error registering actions: {err}");
+    while let Ok(msg) = game.rx.try_recv() {
+        if let Some(msg) = msg {
+            if let Err(err) = game.handle_message(msg) {
+                log::error!("error handling message: {err}");
+            } else {
+                // only handle a single message per frame, this is so actions.valid() works better,
+                // this may or may not prevent some crashes idk
+                break;
             }
-            game.actions.action_context = Some(ctx);
+        } else if let Err(err) = game.initialize() {
+            log::error!("error starting up: {err}");
         }
-    } else {
-        game.actions.action_context = None;
     }
+    let ctx = collect_context(app);
+    if let Some(buf) = game.buffer.take() {
+        if let Some(delta) = ctx.delta(&buf) {
+            if let Err(err) = game.context(format!("Game state changes (not the entire state). If you forgot something, use the `remind` action.\n\n{}", serde_json::to_string(&delta).unwrap()), false) {
+                log::error!("error sending context delta: {err}");
+            }
+        }
+    } else if let Err(err) = game.context(format!("This is the current game state in JSON format. After this, you won't receive full state snapshots anymore, only the changed parts. If you forgot something, use the `remind` action to resend context about something.\n\n{}", serde_json::to_string(&ctx).unwrap()), false) {
+        log::error!("error sending initial context: {err}");
+    }
+    game.buffer = Some(ctx);
     if let Some(mut force) = game.actions.force.clone() {
         if matches!(force.send_at, Some(x) if x < Instant::now()) {
             force.send_at = None;
@@ -4074,15 +5820,6 @@ pub fn loop_hook2(app: &mut CApp) {
                 log::error!("error forcing actions: {err}");
             }
             game.actions.force = Some(force);
-        }
-    }
-    while let Ok(msg) = game.rx.try_recv() {
-        if let Some(msg) = msg {
-            if let Err(err) = game.handle_message(msg) {
-                log::error!("error handling message: {err}");
-            }
-        } else if let Err(err) = game.initialize() {
-            log::error!("error starting up: {err}");
         }
     }
 }

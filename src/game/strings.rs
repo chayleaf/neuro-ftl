@@ -1,4 +1,4 @@
-pub const BUG: &str = "BUG IN THE MOD";
+pub const BUG: &str = "??? BUG IN THE MOD";
 
 pub const LOC_BASE: &str =
     "This is the Federation Base. You have to protect it from the rebels' flagship.";

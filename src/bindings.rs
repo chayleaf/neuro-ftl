@@ -127,7 +127,7 @@ impl System {
             x
         })
     }
-    /*pub fn from_name(name: &str) -> Option<Self> {
+    pub fn from_name(name: &str) -> Option<Self> {
         Some(match name {
             "shields" => Self::Shields,
             "engines" => Self::Engines,
@@ -148,7 +148,7 @@ impl System {
             "reactor" => Self::Reactor,
             _ => return None,
         })
-    }*/
+    }
     fn name(&self) -> &'static str {
         match self {
             Self::Shields => "shields",
@@ -612,7 +612,7 @@ pub struct ShipBuilder {
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x121c)]
     pub b_done: bool,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x1220)]
-    pub ships: [[*const ShipBlueprint; 10]; 3],
+    pub ships: [[*const ShipBlueprint; 3]; 10],
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x1310)]
     pub current_ship_id: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x1314)]
@@ -662,6 +662,12 @@ pub struct ShipBuilder {
     pub tracker: AnimationTracker,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x1e48)]
     pub encourage_ship_list: bool,
+}
+
+impl ShipBuilder {
+    pub fn ship_manager(&self) -> Option<&ShipManager> {
+        unsafe { xc(self.current_ship) }
+    }
 }
 
 #[repr(C)]
@@ -1014,6 +1020,9 @@ impl<T> Vector<T> {
     }
     pub fn get_ptr(&self, index: usize) -> *mut T {
         self.start.wrapping_add(index)
+    }
+    pub fn as_slice(&self) -> &[T] {
+        unsafe { std::slice::from_raw_parts(self.start.cast_const(), self.len()) }
     }
     pub fn get(&self, index: usize) -> Option<&T> {
         (index < self.len()).then(|| unsafe { &*self.get_ptr(index) })
@@ -1712,6 +1721,21 @@ pub enum StoreType {
     Total = 5,
     Items = 6,
     None = 7,
+}
+
+impl StoreType {
+    pub fn from_id(id: i32) -> Self {
+        match id {
+            0 => Self::Weapons,
+            1 => Self::Drones,
+            2 => Self::Augments,
+            3 => Self::Crew,
+            4 => Self::Systems,
+            5 => Self::Total,
+            6 => Self::Items,
+            _ => Self::None,
+        }
+    }
 }
 
 impl fmt::Display for StoreType {
@@ -5088,6 +5112,7 @@ pub struct VtableDrone {
     pub get_powered: Option<fn(*mut Drone) -> bool>,
     pub set_current_ship: Option<fn(*mut Drone, c_int)>,
     pub set_deployed: Option<fn(*mut Drone, bool)>,
+    // 10
     pub set_destroyed: Option<fn(*mut Drone, bool, bool)>,
     pub set_hacked: Option<fn(*mut Drone, c_int)>,
     pub get_deployed: Option<fn(*mut Drone) -> bool>, //
@@ -5098,6 +5123,7 @@ pub struct VtableDrone {
     pub set_world_location: Option<fn(*mut Drone, Point)>,
     pub get_drone_slot: Option<fn(*mut Drone) -> Slot>,
     pub get_drone_health: Option<fn(*mut Drone) -> c_int>,
+    // 20
     pub get_required_power: Option<fn(*mut Drone) -> c_int>,
     pub render_icon: Option<fn(*mut Drone)>,
     pub get_name: Option<fn(*mut Drone) -> StdString>,
@@ -5107,6 +5133,7 @@ pub struct VtableDrone {
     pub save_state: Option<fn(*mut Drone, c_int)>,
     pub load_state: Option<fn(*mut Drone, c_int)>,
     pub blow_up: Option<fn(*mut Drone, bool)>,
+    // 29
     pub get_stunned: Option<fn(*mut Drone) -> bool>,
 }
 
@@ -5326,6 +5353,12 @@ pub struct SpaceDrone {
     pub beam_speed: c_float,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x280)]
     pub hack_sparks: Animation,
+}
+
+impl SpaceDrone {
+    pub fn weapon_blueprint(&self) -> Option<&WeaponBlueprint> {
+        unsafe { xb(self.weapon_blueprint) }
+    }
 }
 
 #[repr(C)]
@@ -6665,9 +6698,169 @@ pub struct CrewMember {
 
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
+pub struct CrewMemberPrime {
+    pub vtable: *const VtableCrewMember,
+    /// Inherited from CrewTarget
+    pub i_ship_id: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xc)]
+    pub x: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x10)]
+    pub y: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x14)]
+    pub size: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x18)]
+    pub scale: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1c)]
+    pub goal_x: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x20)]
+    pub goal_y: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x24)]
+    pub width: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x28)]
+    pub height: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x2c)]
+    pub health: Pair<c_float, c_float>,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x34)]
+    pub speed_x: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x38)]
+    pub speed_y: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x40)]
+    pub path: Path,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x70)]
+    pub new_path: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x74)]
+    pub x_destination: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x78)]
+    pub y_destination: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x80)]
+    pub last_door: *mut Door,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x88)]
+    pub current_repair: *mut Repairable,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x90)]
+    pub b_suffocating: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x94)]
+    pub move_goal: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x98)]
+    pub selection_state: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x9c)]
+    pub i_room_id: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xa0)]
+    pub i_manning_id: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xa4)]
+    pub i_repair_id: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xa8)]
+    pub i_stack_id: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xac)]
+    pub current_slot: Slot,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xbc)]
+    pub intruder: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xbd)]
+    pub b_fighting: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xbe)]
+    pub b_shared_spot: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xc0)]
+    pub crew_anim: *mut CrewAnimation,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xc8)]
+    pub selection_image: *mut GL_Texture,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xd0)]
+    pub health_box: CachedImage,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x118)]
+    pub health_box_red: CachedImage,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x160)]
+    pub health_bar: CachedRect,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x180)]
+    pub f_medbay: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x184)]
+    pub last_damage_timer: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x188)]
+    pub last_health_change: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x18c)]
+    pub current_ship_id: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x190)]
+    pub flash_health_tracker: AnimationTracker,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1b0)]
+    pub current_target: Pointf,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1b8)]
+    pub crew_target: *mut CrewTarget,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1c0)]
+    pub boarding_goal: BoardingGoal,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1d4)]
+    pub b_frozen: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1d5)]
+    pub b_frozen_location: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1d8)]
+    pub task: CrewTask,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1e8)]
+    pub type_: StdString,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1f0)]
+    pub ship: *mut Ship,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1f8)]
+    pub final_goal: Slot,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x208)]
+    pub blocking_door: *mut Door,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x210)]
+    pub b_out_of_game: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x218)]
+    pub species: StdString,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x220)]
+    pub b_dead: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x224)]
+    pub i_on_fire: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x228)]
+    pub b_active_manning: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x230)]
+    pub current_system: *mut ShipSystem,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x238)]
+    pub using_skill: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x240)]
+    pub blueprint: CrewBlueprint,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x340)]
+    pub healing: Animation,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x400)]
+    pub stunned: Animation,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x4c0)]
+    pub level_up: AnimationTracker,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x4e0)]
+    pub last_level_up: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x4e8)]
+    pub stats: SCrewStats,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x518)]
+    pub skills_earned: Vector<VectorBool>,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x530)]
+    pub clone_ready: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x531)]
+    pub b_mind_controlled: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x534)]
+    pub i_death_number: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x538)]
+    pub mind_controlled: Animation,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x5f8)]
+    pub stun_icon: Animation,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x6b8)]
+    pub skill_up: Vector<Vector<AnimationTracker>>,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x6d0)]
+    pub health_boost: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x6d4)]
+    pub f_mind_damage_boost: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x6d8)]
+    pub f_clone_dying: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x6dc)]
+    pub b_resisted: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x6e0)]
+    pub saved_position: Slot,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x6f0)]
+    pub f_stun_time: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x6f8)]
+    pub movement_target: CachedImage,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
 pub struct EnergyAlien {
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
-    pub base: CrewMember,
+    pub base: CrewMemberPrime,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x740)]
+    pub b_cloned: bool,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x741)]
     pub b_trigger_explosion: bool,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x742)]
@@ -6678,7 +6871,9 @@ pub struct EnergyAlien {
 #[derive(Debug, TestOffsets)]
 pub struct CrystalAlien {
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
-    pub base: CrewMember,
+    pub base: CrewMemberPrime,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x740)]
+    pub b_cloned: bool,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x744)]
     pub power_cooldown: Pair<c_float, c_float>,
 }
@@ -6807,6 +7002,16 @@ pub struct EngineSystem {
     pub computer_level: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x244)]
     pub b_boost_ftl: bool,
+}
+
+impl EngineSystem {
+    pub fn dodge_factor(&self) -> c_int {
+        [0, 5, 10, 15, 20, 25, 28, 31, 35]
+            .get(self.base.effective_power() as usize)
+            .copied()
+            .unwrap_or_default()
+            + CrewSkill::Engines.bonus(self.base.manned_boost()) as i32
+    }
 }
 
 #[repr(C)]
@@ -7088,6 +7293,9 @@ pub struct ProjectileFactory {
 impl ProjectileFactory {
     pub fn blueprint(&self) -> Option<&WeaponBlueprint> {
         unsafe { xb(self.blueprint) }
+    }
+    pub fn required_power(&self) -> c_int {
+        self.required_power - self.i_bonus_power
     }
     pub fn num_targets_required(&self) -> c_int {
         if self.blueprint().unwrap().charge_levels > 1 {
@@ -7742,6 +7950,12 @@ impl ShipSystem {
     pub fn power_max(&self) -> c_int {
         self.power_state.second
     }
+    pub fn locked_prime(&self) -> bool {
+        self.i_lock_count == -1 || self.i_lock_count > 0
+    }
+    pub fn hacked(&self) -> bool {
+        self.i_hack_effect > 1
+    }
     pub fn locked(&self) -> bool {
         self.i_lock_count == -1 || self.i_lock_count > 0 || self.i_hack_effect > 1
     }
@@ -8084,9 +8298,9 @@ impl ShipManager {
     pub fn vtable(&self) -> &'static VtableShipManager {
         unsafe { xb(self.vtable).unwrap() }
     }
-}
-
-impl ShipManager {
+    pub fn current_target(&self) -> Option<&ShipManager> {
+        unsafe { xc(self.current_target) }
+    }
     pub unsafe fn power_drone(
         &mut self,
         drone: *mut Drone,
@@ -8246,6 +8460,33 @@ impl ShipManager {
             sys.missile_count
         } else {
             self.temp_missile_count
+        }
+    }
+    pub fn dodge_factor(&self) -> c_int {
+        let Some(engines) = self.engine_system() else {
+            return 0;
+        };
+        let Some(piloting) = self.system(System::Pilot) else {
+            return 0;
+        };
+        if engines.base.hacked() && engines.base.b_under_attack {
+            return 0;
+        }
+        if piloting.hacked() && piloting.b_under_attack {
+            return 0;
+        }
+        let ret =
+            engines.dodge_factor() + CrewSkill::Piloting.bonus(piloting.manned_boost()) as i32;
+        if engines.base.functioning() && piloting.functioning() {
+            ret
+        } else if engines.base.functioning() && piloting.effective_power() > 1 {
+            if piloting.effective_power() == 2 {
+                ret / 2
+            } else {
+                ret * 4 / 5
+            }
+        } else {
+            0
         }
     }
 }
@@ -9139,6 +9380,210 @@ impl ResourceEvent {
         unsafe { xb(self.augment) }
     }
 }
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct StatTracker {
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
+    pub max: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x4)]
+    pub total: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x8)]
+    pub current: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x10)]
+    pub desc_id: StdString,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x18)]
+    pub sector: c_int,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct CrewStatTracker {
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
+    pub max: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x8)]
+    pub name: StdString,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x10)]
+    pub species: StdString,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x18)]
+    pub male: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x20)]
+    pub title_id: StdString,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x28)]
+    pub new_stat: bool,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct TopScore {
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
+    pub name: StdString,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x8)]
+    pub blueprint: StdString,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x10)]
+    pub image: *mut GL_Texture,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x18)]
+    pub sector: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1c)]
+    pub score: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x20)]
+    pub victory: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x24)]
+    pub difficulty: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x28)]
+    pub advanced_content: bool,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct ScoreKeeper {
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
+    pub stats: [StatTracker; 4],
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x80)]
+    pub crew_stats: [CrewStatTracker; 5],
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x170)]
+    pub games_played: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x174)]
+    pub victories: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x178)]
+    pub current_score: TopScore,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1a8)]
+    pub unlocked: Vector<VectorBool>,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1c0)]
+    pub first_run: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1c8)]
+    pub top_scores: Vector<TopScore>,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1e0)]
+    pub ship_scores: Vector<Vector<Vector<TopScore>>>,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1f8)]
+    pub b_saved_score: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1fc)]
+    pub newest_high_score: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x200)]
+    pub newest_ship_best: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x204)]
+    pub newest_ship_type: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x208)]
+    pub newest_ship_layout: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x210)]
+    pub achievements: Vector<Pair<*mut CAchievement, Point>>,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x228)]
+    pub ship_achievements: Vector<Pair<*mut CAchievement, Point>>,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x240)]
+    pub right_box: [*mut GL_Texture; 2],
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x250)]
+    pub left_box: [*mut GL_Texture; 2],
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x260)]
+    pub right_buttons: [Button; 2],
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x380)]
+    pub left_buttons: [Button; 2],
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x4a0)]
+    pub activated_right: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x4a1)]
+    pub activated_left: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x4a8)]
+    pub lock_icon: *mut GL_Texture,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x4b0)]
+    pub info_box: InfoBox,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x588)]
+    pub close_button: TextButton,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x688)]
+    pub type_a: TextButton,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x788)]
+    pub type_b: TextButton,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x888)]
+    pub type_c: TextButton,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x988)]
+    pub left_button: Button,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xa18)]
+    pub right_button: Button,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xaa8)]
+    pub list_button: TextButton,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xba8)]
+    pub buttons: Vector<*mut GenericButton>,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xbc0)]
+    pub selected_ship: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xbc4)]
+    pub selected_layout: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xbc8)]
+    pub selected_ach: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xbcc)]
+    pub selected_ship_ach: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xbd0)]
+    pub ship_select: ShipSelect,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1338)]
+    pub active_touch: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x133c)]
+    pub force_unlock_all: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x133d)]
+    pub got_close_event: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1340)]
+    pub loading_game_version: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1344)]
+    pub ship_list_center: Point,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x134c)]
+    pub type_a_loc: Point,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1354)]
+    pub type_b_loc: Point,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x135c)]
+    pub type_c_loc: Point,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct AchievementTracker {
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
+    pub recently_unlocked: Vector<*mut CAchievement>,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x18)]
+    pub ship_unlocks: Vector<Vector<*mut CAchievement>>,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x30)]
+    pub achievements: Vector<*mut CAchievement>,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x48)]
+    pub game_flags: Map<StdString, c_int>,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x78)]
+    pub achievement_popup: AnimationTracker,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x98)]
+    pub popup_box: *mut GL_Primitive,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xa0)]
+    pub achievement_box: [*mut GL_Primitive; 2],
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xb0)]
+    pub achievement_overlay: [*mut GL_Primitive; 2],
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xc0)]
+    pub current_ship: StdString,
+}
+
+pub const SHIP_BLUEPRINTS: [&str; 30] = [
+    "PLAYER_SHIP_HARD",
+    "PLAYER_SHIP_HARD_2",
+    "PLAYER_SHIP_HARD_3",
+    "PLAYER_SHIP_STEALTH",
+    "PLAYER_SHIP_STEALTH_2",
+    "PLAYER_SHIP_STEALTH_3",
+    "PLAYER_SHIP_MANTIS",
+    "PLAYER_SHIP_MANTIS_2",
+    "PLAYER_SHIP_MANTIS_3",
+    "PLAYER_SHIP_CIRCLE",
+    "PLAYER_SHIP_CIRCLE_2",
+    "PLAYER_SHIP_CIRCLE_3",
+    "PLAYER_SHIP_FED",
+    "PLAYER_SHIP_FED_2",
+    "PLAYER_SHIP_FED_3",
+    "PLAYER_SHIP_JELLY",
+    "PLAYER_SHIP_JELLY_2",
+    "PLAYER_SHIP_JELLY_3",
+    "PLAYER_SHIP_ROCK",
+    "PLAYER_SHIP_ROCK_2",
+    "PLAYER_SHIP_ROCK_3",
+    "PLAYER_SHIP_ENERGY",
+    "PLAYER_SHIP_ENERGY_2",
+    "PLAYER_SHIP_ENERGY_3",
+    "PLAYER_SHIP_CRYSTAL",
+    "PLAYER_SHIP_CRYSTAL_2",
+    "PLAYER_SHIP_CRYSTAL_3",
+    "PLAYER_SHIP_ANAEROBIC",
+    "PLAYER_SHIP_ANAEROBIC_2",
+    "PLAYER_SHIP_ANAEROBIC_3",
+];
 
 #[cfg(test)]
 mod test {

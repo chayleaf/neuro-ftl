@@ -7,7 +7,8 @@ use std::{
 };
 
 use bindings::{
-    CApp, CrewMember, Door, Drone, ProjectileFactory, SettingValues, ShipManager, TabbedWindow,
+    AchievementTracker, CApp, CrewMember, Door, Drone, ProjectileFactory, SettingValues,
+    ShipBuilder, ShipManager, TabbedWindow,
 };
 use ctor::ctor;
 use game::{activated, deactivate};
@@ -136,8 +137,10 @@ fn library() -> &'static TextLibrary {
 
 static TEXT: OnceLock<TextLibrary> = OnceLock::new();
 
+static mut ACHIEVEMENTS: cross::Ptr<0x913780, 0xA37A20, AchievementTracker> = cross::Ptr::new();
+
 // win: 916D20
-static mut SETTING_VALUES: cross::Ptr<0x916D20, 0xA434C0, SettingValues> = cross::Ptr::new();
+static mut SETTINGS: cross::Ptr<0x916D20, 0xA434C0, SettingValues> = cross::Ptr::new();
 
 // win: 91AB20
 static mut POWER_MANAGERS: cross::Ptr<
@@ -190,9 +193,13 @@ static mut MOVE_CREW: cross::Fn4<0x4809B0, 0x4855E0, *mut CrewMember, c_int, c_i
 // win: 517680
 static mut SET_TAB: cross::Fn2<0x517680, 0x585BE0, *mut TabbedWindow, c_uint, ()> =
     cross::Fn2::new();
+// win: 4EFA80
+static mut SWITCH_SHIP: cross::Fn3<0x4EFA80, 0x54FD00, *mut ShipBuilder, c_int, c_int, ()> =
+    cross::Fn3::new();
 
 unsafe fn hook(base: *mut c_void) {
-    SETTING_VALUES.init(base);
+    ACHIEVEMENTS.init(base);
+    SETTINGS.init(base);
     POWER_MANAGERS.init(base);
     POWER_DRONE.init(base);
     DEPOWER_DRONE.init(base);
@@ -202,6 +209,7 @@ unsafe fn hook(base: *mut c_void) {
     DOOR_CLOSE.init(base);
     MOVE_CREW.init(base);
     SET_TAB.init(base);
+    SWITCH_SHIP.init(base);
 
     // quick sanity check
     {

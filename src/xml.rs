@@ -493,7 +493,7 @@ pub struct CrewBlueprint {
 #[serde(deny_unknown_fields)]
 pub struct UpgradeCost {
     #[serde(default, rename = "level")]
-    pub levels: Vec<u32>,
+    pub levels: Vec<i32>,
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
@@ -990,6 +990,22 @@ pub enum DroneType {
     Hacking = 6,
     // supershield
     Shield = 7,
+}
+
+impl DroneType {
+    pub fn from_id(id: i32) -> Option<Self> {
+        Some(match id {
+            0 => Self::Defense,
+            1 => Self::Combat,
+            2 => Self::Repair,
+            3 => Self::Battle,
+            4 => Self::Boarder,
+            5 => Self::ShipRepair,
+            6 => Self::Hacking,
+            7 => Self::Shield,
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]

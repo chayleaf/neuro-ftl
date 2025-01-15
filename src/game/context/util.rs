@@ -20,6 +20,13 @@ macro_rules! impl_delta {
     };
 }
 
+impl<'a, 'b: 'a> Delta<'a> for &'b str {
+    type Delta = &'a str;
+    fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
+        (self != prev).then_some(self)
+    }
+}
+
 impl_delta!(u8, i8, u16, i16, u32, i32, u64, i64, usize, isize);
 impl_delta!((), bool, String);
 
@@ -189,15 +196,9 @@ impl<T> Help<T> {
     }
 }
 
-impl Help<u8> {
+impl<T: From<bool> + PartialEq> Help<T> {
     pub fn is_zero(&self) -> bool {
-        self.value == 0
-    }
-}
-
-impl Help<bool> {
-    pub fn is_false(&self) -> bool {
-        !self.value
+        self.value == T::from(false)
     }
 }
 
@@ -251,12 +252,8 @@ impl_quantized!(
     (QuantizedI64, i64),
 );
 
-pub fn is_false(x: &bool) -> bool {
-    !*x
-}
-
-pub fn is_zero_u8(x: &u8) -> bool {
-    *x == 0
+pub fn is_zero<T: From<bool> + PartialEq>(x: &T) -> bool {
+    *x == T::from(false)
 }
 
 impl<'a, T: HasId<'a>> HasId<'a> for Option<T> {
