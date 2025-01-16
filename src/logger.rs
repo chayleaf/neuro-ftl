@@ -2,8 +2,15 @@ use std::{fs::File, io::Write, sync::mpsc};
 
 pub fn init() {
     let file = std::env::var("RUST_LOG_FILE")
-        .ok()
-        .and_then(|x| File::open(x).ok());
+        .ok() // Some("neuro-ftl.log")
+        .and_then(|x| match File::create(x) {
+            Ok(x) => Some(x),
+            Err(err) => {
+                eprintln!("{err}");
+                println!("{err}");
+                None
+            }
+        });
     // .map(BufWriter::new);
     let mut builder = env_logger::Builder::from_default_env();
     let (tx, rx) = mpsc::channel();

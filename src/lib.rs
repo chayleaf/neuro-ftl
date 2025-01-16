@@ -19,6 +19,8 @@ pub mod game;
 mod logger;
 pub mod pak;
 pub mod xml;
+#[cfg(target_os = "windows")]
+pub mod steam_shim;
 
 #[allow(clippy::large_enum_variant)]
 enum Blueprint {
@@ -271,12 +273,12 @@ unsafe fn hook(base: *mut c_void) {
     GEN_INPUT_EVENTS.init(base, gen_input_events_hook);
 }
 
-#[ctor]
+#[cfg_attr(target_os = "linux", ctor)]
 unsafe fn init() {
     logger::init();
+    //println!("[MOD] stdout test");
+    //eprintln!("[MOD] stdout test");
     // env_logger::init();
-    // this the `konigsberg` code which contains a steam API shim so this can be used as a steam
-    // API wrapper
     #[cfg(target_os = "linux")]
     {
         // on Linux, do LD_PRELOAD stuff
@@ -299,6 +301,7 @@ unsafe fn init() {
             // log::debug!("stem is {stem}, not FTL");
             return;
         }
+        log::error!("logger test");
         unsafe extern "C" fn callback(
             info: *mut libc::dl_phdr_info,
             _size: usize,
@@ -321,7 +324,8 @@ unsafe fn init() {
     }
     #[cfg(target_os = "windows")]
     {
-        let _ = konigsberg::SteamAPI_SteamApps_v009;
+        log::error!("logger test");
+        // let _ = konigsberg::SteamAPI_SteamApps_v009;
         let base: *mut c_void;
         std::arch::asm! {
             "mov eax, fs:[30h]",

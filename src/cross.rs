@@ -37,7 +37,7 @@ impl<const WINDOWS_OFFSET: usize, const LINUX_OFFSET: usize, T>
     Ptr<WINDOWS_OFFSET, LINUX_OFFSET, T>
 {
     #[cfg(target_os = "windows")]
-    pub const OFFSET: usize = WINDOWS_OFFSET;
+    pub const OFFSET: usize = WINDOWS_OFFSET - 0x400000;
     #[cfg(target_os = "linux")]
     pub const OFFSET: usize = LINUX_OFFSET;
     #[allow(clippy::new_without_default)]
@@ -61,7 +61,7 @@ macro_rules! impl_fns {
             pub struct $x<const WINDOWS_OFFSET: usize, const LINUX_OFFSET: usize, $arg0, $($arg,)* R>(pub Option<unsafe extern "fastcall" fn($arg0, std::ffi::c_int, $($arg),*) -> R>);
             impl<const WINDOWS_OFFSET: usize, const LINUX_OFFSET: usize, $arg0, $($arg,)* R> $x<WINDOWS_OFFSET, LINUX_OFFSET, $arg0, $($arg,)* R> {
                 #[cfg(target_os = "windows")]
-                pub const OFFSET: usize = WINDOWS_OFFSET;
+                pub const OFFSET: usize = WINDOWS_OFFSET - 0x400000;
                 #[cfg(target_os = "linux")]
                 pub const OFFSET: usize = LINUX_OFFSET;
                 #[allow(clippy::new_without_default)]
@@ -101,7 +101,7 @@ macro_rules! impl_fns {
                 $y<WINDOWS_OFFSET, LINUX_OFFSET, $arg0, $($arg,)* R>
             {
                 #[cfg(target_os = "windows")]
-                pub const OFFSET: usize = WINDOWS_OFFSET;
+                pub const OFFSET: usize = WINDOWS_OFFSET - 0x400000;
                 #[cfg(target_os = "linux")]
                 pub const OFFSET: usize = LINUX_OFFSET;
                 #[allow(clippy::new_without_default)]
@@ -157,7 +157,7 @@ impl<const WINDOWS_OFFSET: usize, const LINUX_OFFSET: usize, A, R>
     Fn1<WINDOWS_OFFSET, LINUX_OFFSET, A, R>
 {
     #[cfg(target_os = "windows")]
-    pub const OFFSET: usize = WINDOWS_OFFSET;
+    pub const OFFSET: usize = WINDOWS_OFFSET - 0x400000;
     #[cfg(target_os = "linux")]
     pub const OFFSET: usize = LINUX_OFFSET;
     #[allow(clippy::new_without_default)]
@@ -190,7 +190,7 @@ impl<const WINDOWS_OFFSET: usize, const LINUX_OFFSET: usize, A: 'static, R: 'sta
     Hook1<WINDOWS_OFFSET, LINUX_OFFSET, A, R>
 {
     #[cfg(target_os = "windows")]
-    pub const OFFSET: usize = WINDOWS_OFFSET;
+    pub const OFFSET: usize = WINDOWS_OFFSET - 0x400000;
     #[cfg(target_os = "linux")]
     pub const OFFSET: usize = LINUX_OFFSET;
     #[allow(clippy::new_without_default)]

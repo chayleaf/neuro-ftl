@@ -48,6 +48,14 @@ struct State {
 unsafe impl Sync for State {}
 unsafe impl Send for State {}
 
+/*fn ships() -> BTreeMap<String, bool> {
+    for ach in unsafe { (*crate::ACHIEVEMENTS.0).achievements.iter() } {
+        let ach = unsafe { xc(*ach).unwrap() };
+        ach.ship
+    }
+
+}*/
+
 fn resource_event_str(
     res: &bindings::ResourceEvent,
     ship_manager: &bindings::ShipManager,
@@ -398,7 +406,10 @@ impl neuro_sama::game::GameMut for State {
                                 }
                                 super::SWITCH_SHIP.call(ptr::addr_of_mut!(*s), i as i32, j as i32);
                             }
-                            Ok(Cow::from("selected the ship layout {i}/variation {j}").into())
+                            Ok(
+                                Cow::from(format!("selected the ship layout {i}/variation {j}"))
+                                    .into(),
+                            )
                         } else {
                             Err(Cow::from("can't select a ship at the moment").into())
                         }
@@ -406,10 +417,30 @@ impl neuro_sama::game::GameMut for State {
                         let names: Vec<_> = s
                             .ships
                             .into_iter()
-                            .flatten()
-                            .filter_map(|x| unsafe { xb(x) })
-                            .filter(|x| x.name.to_str() != "should not be seen")
-                            .map(|x| serde_json::Value::String(x.name.to_str().into_owned()))
+                            .enumerate()
+                            .flat_map(|(i, x)| {
+                                x.into_iter().enumerate().filter_map(move |(j, x)| {
+                                    let unlocked = unsafe {
+                                        (**(*crate::ACHIEVEMENTS.0)
+                                            .ship_unlocks
+                                            .get(i)
+                                            .unwrap()
+                                            .get(j)
+                                            .unwrap())
+                                        .unlocked
+                                    };
+                                    if !unlocked {
+                                        return None;
+                                    }
+                                    let bp = unsafe { xb(x) }?;
+                                    let name = bp.name.to_str();
+                                    if &name == "should not be seen" {
+                                        return None;
+                                    }
+                                    Some(name)
+                                })
+                            })
+                            .map(|x| serde_json::Value::String(x.into_owned()))
                             .collect();
                         Err(Cow::from(format!(
                             "the ship was not found, available ship names: {}",
@@ -3252,10 +3283,31 @@ fn available_actions(app: &CApp) -> ActionDb {
             let names: Vec<_> = s
                 .ships
                 .into_iter()
-                .flatten()
-                .filter_map(|x| unsafe { xb(x) })
-                .filter(|x| x.name.to_str() != "should not be seen")
-                .map(|x| serde_json::Value::String(x.name.to_str().into_owned()))
+                .enumerate()
+                .flat_map(|(i, x)| {
+                    x.into_iter().enumerate().filter_map(move |(j, x)| {
+                        let unlocked = unsafe {
+                            (**(*crate::ACHIEVEMENTS.0)
+                                .ship_unlocks
+                                .get(i)
+                                .unwrap()
+                                .get(j)
+                                .unwrap())
+                            .unlocked
+                        };
+                        let bp = unsafe { xb(x) }?;
+                        log::info!("bp {:?} unl {:?} - {unlocked:?}", bp.name.to_str(), bp.unlock.to_str());
+                        if !unlocked {
+                            return None;
+                        }
+                        let name = bp.name.to_str();
+                        if &name == "should not be seen" {
+                            return None;
+                        }
+                        Some(name)
+                    })
+                })
+                .map(|x| serde_json::Value::String(x.into_owned()))
                 .collect();
             if !names.is_empty() {
                 let mut meta = meta::<actions::SelectShip>();
@@ -6139,6 +6191,17 @@ pub unsafe fn loop_hook(app: *mut CApp) {
     if !activated() {
         return;
     }
+    std::panic::set_hook(Box::new(|info| {
+        if let Some(s) = info.payload().downcast_ref::<&str>() {
+            log::error!("panic occurred: {s}");
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            log::error!("panic occurred: {s}");
+        } else {
+            log::error!("panic occurred");
+        }
+        let backtrace = std::backtrace::Backtrace::capture();
+        log::error!("Backtrace:\n{:#?}", backtrace);
+    }));
     if !app.is_null() {
         #[allow(clippy::blocks_in_conditions)]
         if std::panic::catch_unwind(|| {

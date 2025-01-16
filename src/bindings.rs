@@ -740,10 +740,10 @@ pub struct MainMenu {
     pub credits: CreditScreen,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x38a0)]
     pub b_changed_login: bool,
-    #[cfg(target_os = "windows")]
-    pub _unk1: c_int,
-    #[cfg(target_os = "windows")]
-    pub _unk2: c_int,
+    // #[cfg(target_os = "windows")]
+    // pub _unk1: c_int,
+    // #[cfg(target_os = "windows")]
+    // pub _unk2: c_int,
     #[cfg_attr(target_os = "windows", test_offset = 0x3574)]
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x38a8)]
     pub test_crew: Vector<*mut CrewMember>,
@@ -755,7 +755,7 @@ pub struct MainMenu {
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x38c8)]
     pub error: StdString,
     #[cfg(target_os = "windows")]
-    pub _unk3: c_char,
+    pub _unk3: u8,
 }
 
 #[repr(C)]
@@ -1069,6 +1069,12 @@ pub struct VectorBool {
     pub end_of_storage: *mut VectorBoolStorage,
 }
 
+/*impl VectorBool {
+    pub fn get(&self) -> bool {
+
+    }
+}*/
+
 #[repr(C)]
 #[derive(Debug)]
 pub struct QueueIter<T> {
@@ -1112,7 +1118,7 @@ pub struct StdString {
 pub struct StdString {
     // if it equals &res, stack allocation
     // if it's anything else, heap allocation
-    pub data: *const c_char,
+    pub data: *const u8,
     pub size: usize,
     pub res: usize,
     pub extra: [u8; 12],

@@ -159,46 +159,17 @@ impl<'a, T: 'a + Clone + std::fmt::Debug + Delta<'a> + HasId<'a> + Serialize> De
 
 impl<
         'a,
-        K: Clone + std::fmt::Debug + Serialize + Ord,
-        T: Clone + std::fmt::Debug + Delta<'a> + Serialize,
+        K: 'a + Clone + std::fmt::Debug + Serialize + Ord,
+        T: 'a + Clone + std::fmt::Debug + Delta<'a> + Serialize + PartialEq,
     > Delta<'a> for BTreeMap<K, T>
 {
-    type Delta = BTreeMap<K, Operations<T, T::Delta>>;
+    type Delta = Option<&'a BTreeMap<K, T>>;
     fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
-        let mut ret = BTreeMap::new();
-        let mut this = self.iter().peekable();
-        let mut that = prev.iter().peekable();
-        loop {
-            match (this.peek(), that.peek()) {
-                (None, None) => break,
-                (None, Some(_)) => {
-                    let (k, v) = that.next().unwrap();
-                    ret.insert(k.clone(), Operations::Removed(v.clone()));
-                }
-                (Some(_), None) => {
-                    let (k, v) = this.next().unwrap();
-                    ret.insert(k.clone(), Operations::Added(v.clone()));
-                }
-                (Some(x), Some(y)) => match x.0.cmp(y.0) {
-                    Ordering::Less => {
-                        let (k, v) = this.next().unwrap();
-                        ret.insert(k.clone(), Operations::Added(v.clone()));
-                    }
-                    Ordering::Greater => {
-                        let (k, v) = that.next().unwrap();
-                        ret.insert(k.clone(), Operations::Removed(v.clone()));
-                    }
-                    Ordering::Equal => {
-                        let (k, a) = this.next().unwrap();
-                        let (_, b) = that.next().unwrap();
-                        if let Some(delta) = a.delta(b) {
-                            ret.insert(k.clone(), Operations::Changed(delta));
-                        }
-                    }
-                },
-            }
+        if self == prev {
+            None
+        } else {
+            Some(if self.is_empty() { None } else { Some(self) })
         }
-        (!ret.is_empty()).then_some(ret)
     }
 }
 
