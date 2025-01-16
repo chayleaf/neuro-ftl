@@ -7,8 +7,8 @@ use std::{
 };
 
 use bindings::{
-    AchievementTracker, CApp, CrewMember, Door, Drone, ProjectileFactory, SettingValues,
-    ShipBuilder, ShipManager, TabbedWindow,
+    AchievementTracker, CApp, CrewMember, Door, Drone, ProjectileFactory, ScoreKeeper,
+    SettingValues, ShipBuilder, ShipManager, TabbedWindow,
 };
 use ctor::ctor;
 use game::{activated, deactivate};
@@ -18,9 +18,9 @@ pub mod cross;
 pub mod game;
 mod logger;
 pub mod pak;
-pub mod xml;
 #[cfg(target_os = "windows")]
 pub mod steam_shim;
+pub mod xml;
 
 #[allow(clippy::large_enum_variant)]
 enum Blueprint {
@@ -137,9 +137,14 @@ fn library() -> &'static TextLibrary {
     TEXT.get_or_init(TextLibrary::new)
 }
 
+fn keeper() -> &'static ScoreKeeper {
+    unsafe { &*KEEPER.0 }
+}
+
 static TEXT: OnceLock<TextLibrary> = OnceLock::new();
 
 static mut ACHIEVEMENTS: cross::Ptr<0x913780, 0xA37A20, AchievementTracker> = cross::Ptr::new();
+static mut KEEPER: cross::Ptr<0x913980, 0xA38CA0, ScoreKeeper> = cross::Ptr::new();
 
 // win: 916D20
 static mut SETTINGS: cross::Ptr<0x916D20, 0xA434C0, SettingValues> = cross::Ptr::new();
@@ -201,6 +206,7 @@ static mut SWITCH_SHIP: cross::Fn3<0x4EFA80, 0x54FD00, *mut ShipBuilder, c_int, 
 
 unsafe fn hook(base: *mut c_void) {
     ACHIEVEMENTS.init(base);
+    KEEPER.init(base);
     SETTINGS.init(base);
     POWER_MANAGERS.init(base);
     POWER_DRONE.init(base);

@@ -1069,11 +1069,15 @@ pub struct VectorBool {
     pub end_of_storage: *mut VectorBoolStorage,
 }
 
-/*impl VectorBool {
-    pub fn get(&self) -> bool {
-
+impl VectorBool {
+    const SLOT_BITS: usize = mem::size_of::<VectorBoolStorage>() * 8;
+    pub fn get(&self, i: usize) -> bool {
+        unsafe {
+            let slot = self.start.ptr.add(i / Self::SLOT_BITS);
+            ((1 << (i % Self::SLOT_BITS)) & *slot) != 0
+        }
     }
-}*/
+}
 
 #[repr(C)]
 #[derive(Debug)]
@@ -9648,6 +9652,13 @@ pub struct ScoreKeeper {
     pub type_b_loc: Point,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x135c)]
     pub type_c_loc: Point,
+}
+
+impl ScoreKeeper {
+    pub fn unlocked(&self, i: usize, j: usize) -> bool {
+        debug_assert!(j <= 2);
+        self.force_unlock_all || self.unlocked.get(i).unwrap().get(j)
+    }
 }
 
 #[repr(C)]

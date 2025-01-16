@@ -48,14 +48,6 @@ struct State {
 unsafe impl Sync for State {}
 unsafe impl Send for State {}
 
-/*fn ships() -> BTreeMap<String, bool> {
-    for ach in unsafe { (*crate::ACHIEVEMENTS.0).achievements.iter() } {
-        let ach = unsafe { xc(*ach).unwrap() };
-        ach.ship
-    }
-
-}*/
-
 fn resource_event_str(
     res: &bindings::ResourceEvent,
     ship_manager: &bindings::ShipManager,
@@ -380,15 +372,7 @@ impl neuro_sama::game::GameMut for State {
                                 if ship_name == "should not be seen" {
                                     return None;
                                 }
-                                let unlocked = unsafe {
-                                    (**(*crate::ACHIEVEMENTS.0)
-                                        .ship_unlocks
-                                        .get(i)
-                                        .unwrap()
-                                        .get(j)
-                                        .unwrap())
-                                    .unlocked
-                                };
+                                let unlocked = crate::keeper().unlocked(i, j);
                                 if !unlocked {
                                     return None;
                                 }
@@ -420,15 +404,7 @@ impl neuro_sama::game::GameMut for State {
                             .enumerate()
                             .flat_map(|(i, x)| {
                                 x.into_iter().enumerate().filter_map(move |(j, x)| {
-                                    let unlocked = unsafe {
-                                        (**(*crate::ACHIEVEMENTS.0)
-                                            .ship_unlocks
-                                            .get(i)
-                                            .unwrap()
-                                            .get(j)
-                                            .unwrap())
-                                        .unlocked
-                                    };
+                                    let unlocked = crate::keeper().unlocked(i, j);
                                     if !unlocked {
                                         return None;
                                     }
@@ -3286,17 +3262,8 @@ fn available_actions(app: &CApp) -> ActionDb {
                 .enumerate()
                 .flat_map(|(i, x)| {
                     x.into_iter().enumerate().filter_map(move |(j, x)| {
-                        let unlocked = unsafe {
-                            (**(*crate::ACHIEVEMENTS.0)
-                                .ship_unlocks
-                                .get(i)
-                                .unwrap()
-                                .get(j)
-                                .unwrap())
-                            .unlocked
-                        };
+                        let unlocked = crate::keeper().unlocked(i, j);
                         let bp = unsafe { xb(x) }?;
-                        log::info!("bp {:?} unl {:?} - {unlocked:?}", bp.name.to_str(), bp.unlock.to_str());
                         if !unlocked {
                             return None;
                         }
@@ -5674,15 +5641,7 @@ fn collect_context(app: &CApp) -> context::Context {
                     .enumerate()
                     .flat_map(|(i, x)| {
                         x.into_iter().enumerate().filter_map(move |(j, x)| {
-                            let unlocked = unsafe {
-                                (**(*crate::ACHIEVEMENTS.0)
-                                    .ship_unlocks
-                                    .get(i)
-                                    .unwrap()
-                                    .get(j)
-                                    .unwrap())
-                                .unlocked
-                            };
+                            let unlocked = crate::keeper().unlocked(i, j);
                             let bp = unsafe { xb(x) }?;
                             if bp.name.to_str() == "should not be seen" {
                                 return None;
