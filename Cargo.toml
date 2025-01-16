@@ -1,5 +1,5 @@
 [package]
-name = "neuro-ftl"
+name = "neuro_ftl"
 version = "0.1.0"
 edition = "2021"
 

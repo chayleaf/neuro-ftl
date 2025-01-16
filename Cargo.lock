@@ -441,31 +441,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "neuro-ftl"
-version = "0.1.0"
-dependencies = [
- "ctor",
- "env_logger",
- "futures-util",
- "indexmap",
- "libc",
- "libloading",
- "log",
- "neuro-ftl-derive",
- "neuro-sama",
- "quick-xml",
- "rand",
- "retour",
- "schemars",
- "serde",
- "serde_json",
- "steamworks-sys",
- "tokio",
- "tokio-tungstenite",
- "tungstenite",
-]
-
-[[package]]
 name = "neuro-ftl-derive"
 version = "0.1.0"
 dependencies = [
@@ -498,6 +473,31 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "neuro_ftl"
+version = "0.1.0"
+dependencies = [
+ "ctor",
+ "env_logger",
+ "futures-util",
+ "indexmap",
+ "libc",
+ "libloading",
+ "log",
+ "neuro-ftl-derive",
+ "neuro-sama",
+ "quick-xml",
+ "rand",
+ "retour",
+ "schemars",
+ "serde",
+ "serde_json",
+ "steamworks-sys",
+ "tokio",
+ "tokio-tungstenite",
+ "tungstenite",
 ]
 
 [[package]]
