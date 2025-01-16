@@ -1,0 +1,20 @@
+name: Rust
+permissions: write-all
+on:
+  push:
+    branches: [ "master" ]
+env:
+  CARGO_TERM_COLOR: always
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+jobs:
+  build-win32:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: rs-action
+      uses: chayleaf/rs-actions@konigsberg
+      with:
+        publish-release: true
+        target: i686-pc-windows-msvc
+
+
