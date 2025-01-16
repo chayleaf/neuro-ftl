@@ -7484,7 +7484,7 @@ pub struct ShieldAnimation {
 }
 
 #[repr(C)]
-#[derive(Debug, TestOffsets)]
+#[derive(Copy, Clone, Debug, TestOffsets)]
 pub struct ShieldPower {
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
     pub first: c_int,
@@ -7492,6 +7492,15 @@ pub struct ShieldPower {
     pub second: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x8)]
     pub super_: Pair<c_int, c_int>,
+}
+
+impl ShieldPower {
+    pub fn into_pair(self) -> Pair<c_int, c_int> {
+        Pair {
+            first: self.first,
+            second: self.second,
+        }
+    }
 }
 
 #[repr(C)]

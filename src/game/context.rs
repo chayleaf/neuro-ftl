@@ -102,8 +102,8 @@ pub struct DroneInfo {
     pub hacked: bool,
     #[serde(skip_serializing_if = "is_zero")]
     pub dead: bool,
-    pub health: Option<i32>,
-    pub max_health: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub health: Option<Pair<i32>>,
     // for crew
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<Location>,
@@ -171,12 +171,9 @@ pub struct SystemLevel {
 #[derive(Clone, Debug, Serialize, Delta, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ReactorState {
-    pub power_used: i32,
-    pub max_power: i32,
-    #[serde(skip_serializing_if = "is_zero")]
-    pub battery_power_used: i32,
-    #[serde(skip_serializing_if = "is_zero")]
-    pub max_battery_power: i32,
+    pub power: Pair<i32>,
+    #[serde(skip_serializing_if = "Pair::is_zero")]
+    pub battery_power: Pair<i32>,
     #[serde(skip_serializing_if = "is_zero")]
     pub reduced_capacity: bool,
     #[serde(skip_serializing_if = "is_zero")]
@@ -202,21 +199,17 @@ pub struct SystemInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub room_id: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub hp: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_hp: Option<i32>,
+    pub hp: Option<Pair<i32>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub can_be_manned: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_manned_bonus: Option<Cow<'static, str>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub power: Option<i32>,
-    pub max_power: Option<i32>,
+    pub power: Option<Pair<i32>>,
     pub levels: Vec<SystemLevel>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active: Option<bool>,
-    pub level: i32,
-    pub max_level: i32,
+    pub level: Pair<i32>,
     // Some(false) or Some(true) if this is e.g. cloaking, None if this is something that doesnt
     // get locked down normally
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -242,13 +235,9 @@ pub struct SystemInfo {
     pub drone_names: Vec<String>,
     // for shields
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub shields: Option<i32>,
+    pub shields: Option<Pair<i32>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_shields: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub super_shields: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_super_shields: Option<i32>,
+    pub super_shields: Option<Pair<i32>>,
     // for hacking
     #[serde(skip_serializing_if = "is_zero")]
     pub hacking_in_progress: bool,
@@ -258,14 +247,10 @@ pub struct SystemInfo {
     pub hacking_drone_system: Option<&'static str>,
     // for battery
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub battery_power: Option<i32>,
-    #[serde(skip_serializing_if = "is_zero")]
-    pub max_battery_power: i32,
+    pub battery_power: Option<Pair<i32>>,
     // for oxygen
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ship_oxygen_level: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ship_max_oxygen_level: Option<i32>,
+    pub ship_oxygen_level: Option<Pair<i32>>,
     // for artillery
     #[serde(skip_serializing_if = "Option::is_none")]
     pub artillery_weapon: Option<WeaponInfo>,
@@ -311,10 +296,11 @@ pub struct RoomInfo {
     pub intruder_names: Vec<String>,
     #[delta1]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[delta(skip_serializing_if = "Option::is_none")]
     pub system_name: Option<String>,
     #[serde(skip_serializing_if = "is_zero")]
     pub fire_level: i32,
-    pub oxygen_percentage: i32,
+    pub oxygen_percentage: QuantizedI32<25>,
     #[serde(skip_serializing_if = "is_zero")]
     pub hacked: bool,
 }
@@ -423,8 +409,7 @@ pub struct CrewInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<Location>,
     pub bonuses: Skills,
-    pub health: i32,
-    pub max_health: i32,
+    pub health: Pair<i32>,
     // reuse on_fire for this because who cares
     #[serde(skip_serializing_if = "is_zero")]
     pub fighting_fire: bool,
@@ -463,8 +448,7 @@ pub struct ShipInfo {
     pub weapons: Vec<ItemSlot<WeaponInfo>>,
     pub drones: Vec<ItemSlot<DroneInfo>>,
     pub augments: Vec<ItemSlot<AugmentInfo>>,
-    pub hull: Help<i32>,
-    pub max_hull: i32,
+    pub hull: Help<Pair<i32>>,
     pub evasion_chance_percentage: i32,
 }
 
@@ -605,10 +589,18 @@ pub struct Context {
     pub enemy_ship: Option<ShipInfo>,
 }
 
-#[derive(Copy, Clone, Debug, Default, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct Pair<T> {
+#[derive(Copy, Clone, Debug, Default, Delta, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct Pair<T: std::fmt::Debug + Ord + Serialize> {
+    #[delta1]
     pub current: T,
+    #[delta1]
     pub max: T,
+}
+
+impl<T: std::fmt::Debug + Ord + Serialize + From<bool>> Pair<T> {
+    pub fn is_zero(&self) -> bool {
+        is_zero(&self.current) && is_zero(&self.max)
+    }
 }
 
 #[derive(Copy, Clone, Debug, Default, Delta, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]

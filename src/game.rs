@@ -3060,11 +3060,15 @@ impl neuro_sama::game::GameMut for State {
 fn reactor_state(ship_id: i32) -> Option<context::ReactorState> {
     let mgr = power_manager(ship_id)?;
     Some(context::ReactorState {
-        power_used: mgr.current_power.first,
-        max_power: (mgr.current_power.second - mgr.i_hacked - mgr.i_temp_power_loss)
-            .min(mgr.i_temp_power_cap),
-        battery_power_used: mgr.battery_power.first,
-        max_battery_power: mgr.battery_power.second,
+        power: context::Pair {
+            current: mgr.current_power.first,
+            max: (mgr.current_power.second - mgr.i_hacked - mgr.i_temp_power_loss)
+                .min(mgr.i_temp_power_cap),
+        },
+        battery_power: context::Pair {
+            current: mgr.battery_power.first,
+            max: mgr.battery_power.second,
+        },
         reduced_capacity: mgr.i_temp_power_loss != 0
             || mgr.i_temp_power_cap < mgr.current_power.second
             || mgr.i_hacked != 0,
@@ -3074,7 +3078,7 @@ fn reactor_state(ship_id: i32) -> Option<context::ReactorState> {
 
 static mut GAME: OnceLock<State> = OnceLock::new();
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default)]
 struct Force {
     query: Cow<'static, str>,
     context: Option<Cow<'static, str>>,
@@ -3082,6 +3086,15 @@ struct Force {
     send_at: Option<Instant>,
     retry_timeout: Duration,
 }
+
+impl PartialEq for Force {
+    fn eq(&self, other: &Self) -> bool {
+        self.query == other.query
+            && self.context == other.context
+            && self.ephemeral == other.ephemeral
+    }
+}
+impl Eq for Force {}
 
 impl Force {
     pub fn new(query: impl Into<Cow<'static, str>>, timeout: Duration) -> Self {
@@ -4030,7 +4043,8 @@ fn room_desc(
         oxygen_percentage: mgr
             .oxygen_system()
             .map(|x| *x.oxygen_levels.get(room.i_room_id as usize).unwrap() as i32)
-            .unwrap_or_default(),
+            .unwrap_or_default()
+            .into(),
         hacked: room.i_hack_level > 1,
     }
 }
@@ -4204,8 +4218,10 @@ fn crew_desc<'a>(crew: &'a bindings::CrewMember, map: &mut IdMap<'a>) -> context
                 }),
             }
         },
-        health: crew.health.first as i32,
-        max_health: crew.health.second as i32,
+        health: context::Pair {
+            current: crew.health.first as i32,
+            max: crew.health.second as i32,
+        },
         fighting_fire: crew.i_on_fire > 0,
         suffocating: crew.b_suffocating,
         fighting: crew.b_fighting,
@@ -4435,8 +4451,10 @@ fn crew_bp_desc<'a>(
                 ),
             }
         },
-        health: max_hp,
-        max_health: max_hp,
+        health: context::Pair {
+            current: max_hp,
+            max: max_hp,
+        },
         fighting_fire: false,
         suffocating: false,
         fighting: false,
@@ -4457,7 +4475,7 @@ fn drone_desc<'a>(drone: &'a bindings::Drone, map: &mut IdMap<'a>) -> context::D
     } else {
         ShipId::Enemy
     };
-    let (health, max_health, location, weapon) = match DroneType::from_id(bp.type_) {
+    let (health, location, weapon) = match DroneType::from_id(bp.type_) {
         Some(
             DroneType::Defense
             | DroneType::Combat
@@ -4469,7 +4487,6 @@ fn drone_desc<'a>(drone: &'a bindings::Drone, map: &mut IdMap<'a>) -> context::D
             (
                 None,
                 None,
-                None,
                 drone
                     .weapon_blueprint()
                     .map(|x| weapon_bp_desc(x, &mut IdMap::new(), faction)),
@@ -4478,8 +4495,10 @@ fn drone_desc<'a>(drone: &'a bindings::Drone, map: &mut IdMap<'a>) -> context::D
         Some(DroneType::Repair | DroneType::Battle | DroneType::Boarder) => {
             let drone = unsafe { &*p_drone.cast::<bindings::CrewDrone>() };
             (
-                Some(drone.base.health.first as i32),
-                Some(drone.base.health.second as i32),
+                Some(context::Pair {
+                    current: drone.base.health.first as i32,
+                    max: drone.base.health.second as i32,
+                }),
                 (drone.base.current_ship_id >= 0 && drone.base.i_room_id >= 0).then_some(
                     context::Location {
                         ship: if drone.base.current_ship_id == 0 {
@@ -4493,7 +4512,7 @@ fn drone_desc<'a>(drone: &'a bindings::Drone, map: &mut IdMap<'a>) -> context::D
                 None,
             )
         }
-        None => (None, None, None, None),
+        None => (None, None, None),
     };
     context::DroneInfo {
         drone_name: map.map(bp.desc.title.to_str()).into_owned(),
@@ -4510,7 +4529,6 @@ fn drone_desc<'a>(drone: &'a bindings::Drone, map: &mut IdMap<'a>) -> context::D
         hacked: drone.i_hack_level > 1,
         dead: drone.b_dead,
         health,
-        max_health,
         location,
         weapon,
     }
@@ -4547,8 +4565,7 @@ fn drone_bp_desc<'a>(
         powered: false,
         hacked: false,
         dead: false,
-        health: None,
-        max_health,
+        health: max_health.map(|x| context::Pair { current: x, max: x }),
         location: None,
         weapon: None,
     }
@@ -4782,6 +4799,15 @@ fn system_levels(
         .collect()
 }
 
+impl<T: serde::Serialize + Ord + std::fmt::Debug> From<bindings::Pair<T, T>> for context::Pair<T> {
+    fn from(value: bindings::Pair<T, T>) -> Self {
+        Self {
+            current: value.first,
+            max: value.second,
+        }
+    }
+}
+
 fn system_desc(system: &bindings::ShipSystem, map: &mut IdMap<'static>) -> context::SystemInfo {
     let sys = System::from_id(system.i_system_type).unwrap();
     let bp = sys.blueprint().unwrap();
@@ -4804,8 +4830,10 @@ fn system_desc(system: &bindings::ShipSystem, map: &mut IdMap<'static>) -> conte
         system_name: map.map(bp.title.to_str().into()),
         description: bp.desc.to_str().into(),
         tooltip: (sys != System::Artillery).then(|| sys.tooltip(system.i_ship_id != 0)),
-        hp: Some(system.health_state.first),
-        max_hp: Some(system.health_state.second),
+        hp: Some(context::Pair {
+            current: system.health_state.first,
+            max: system.health_state.second,
+        }),
         can_be_manned: Some(system.b_boostable),
         current_manned_bonus: (system.i_active_manned > 0).then(|| match sys {
             System::Shields => text("shield_skill")
@@ -4845,12 +4873,16 @@ fn system_desc(system: &bindings::ShipSystem, map: &mut IdMap<'static>) -> conte
             System::Sensors | System::Doors => text("subsystem_manned").into(),
             _ => "".into(),
         }),
-        power: Some(system.effective_power()),
-        max_power: Some(system.max_power()),
-        max_level: bp.max_power as i32,
+        power: Some(context::Pair {
+            current: system.effective_power(),
+            max: system.max_power(),
+        }),
+        level: context::Pair {
+            current: system.power_state.second,
+            max: bp.max_power as i32,
+        },
         levels,
         active: Some(system.functioning()),
-        level: system.power_state.second,
         on_cooldown: match sys {
             System::Battery
             | System::Mind
@@ -4913,19 +4945,11 @@ fn system_desc(system: &bindings::ShipSystem, map: &mut IdMap<'static>) -> conte
             .unwrap_or_default(),
         shields: (sys == System::Shields).then(|| {
             let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::Shields>() };
-            system.shields.power.first
-        }),
-        max_shields: (sys == System::Shields).then(|| {
-            let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::Shields>() };
-            system.shields.power.second
+            system.shields.power.into_pair().into()
         }),
         super_shields: (sys == System::Shields).then(|| {
             let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::Shields>() };
-            system.shields.power.super_.first
-        }),
-        max_super_shields: (sys == System::Shields).then(|| {
-            let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::Shields>() };
-            system.shields.power.super_.second
+            system.shields.power.super_.into()
         }),
         hacking_in_progress: (sys == System::Hacking)
             .then(|| {
@@ -4951,19 +4975,16 @@ fn system_desc(system: &bindings::ShipSystem, map: &mut IdMap<'static>) -> conte
                     .map(|x| x.title.to_str())
             })
             .flatten(),
-        battery_power: (sys == System::Battery)
-            .then(|| reactor.map(|x| x.max_battery_power))
-            .flatten(),
-        max_battery_power: (sys == System::Battery)
-            .then(|| system.effective_power() * 2)
-            .unwrap_or_default(),
+        battery_power: (sys == System::Battery).then(|| context::Pair {
+            current: reactor.map(|x| x.battery_power.max).unwrap_or_default(),
+            max: system.effective_power() * 2,
+        }),
         ship_oxygen_level: (sys == System::Oxygen).then(|| {
             let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::OxygenSystem>() };
-            (system.f_total_oxygen * system.max_oxygen).round() as i32
-        }),
-        ship_max_oxygen_level: (sys == System::Oxygen).then(|| {
-            let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::OxygenSystem>() };
-            system.max_oxygen.round() as i32
+            context::Pair {
+                current: (system.f_total_oxygen * system.max_oxygen).round() as i32,
+                max: system.max_oxygen.round() as i32,
+            }
         }),
         artillery_weapon: (sys == System::Artillery).then(|| {
             let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::ArtillerySystem>() };
@@ -4992,15 +5013,15 @@ fn system_bp_desc<'a>(
         description: system.desc.description.to_str().into_owned().into(),
         tooltip: (sys != System::Artillery).then(|| sys.tooltip(faction == ShipId::Enemy)),
         hp: None,
-        max_hp: None,
         can_be_manned: None,
         current_manned_bonus: None,
         power: None,
-        max_power: None,
-        max_level: system.max_power,
+        level: context::Pair {
+            current: system.start_power,
+            max: system.max_power,
+        },
         levels,
         active: None,
-        level: system.start_power,
         on_cooldown: None,
         hacked: false,
         on_fire: false,
@@ -5028,19 +5049,11 @@ fn system_bp_desc<'a>(
             .unwrap_or_default(),
         shields: (sys == System::Shields).then(|| {
             let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::Shields>() };
-            system.shields.power.first
-        }),
-        max_shields: (sys == System::Shields).then(|| {
-            let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::Shields>() };
-            system.shields.power.second
+            system.shields.power.into_pair().into()
         }),
         super_shields: (sys == System::Shields).then(|| {
             let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::Shields>() };
-            system.shields.power.super_.first
-        }),
-        max_super_shields: (sys == System::Shields).then(|| {
-            let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::Shields>() };
-            system.shields.power.super_.second
+            system.shields.power.super_.into()
         }),
         hacking_in_progress: (sys == System::Hacking)
             .then(|| {
@@ -5066,12 +5079,11 @@ fn system_bp_desc<'a>(
                     .map(|x| x.title.to_str())
             })
             .flatten(),
-        battery_power: None,
-        max_battery_power: (sys == System::Battery)
-            .then(|| system.start_power * 2)
-            .unwrap_or_default(),
+        battery_power: (sys == System::Battery).then(|| context::Pair {
+            current: 0,
+            max: system.start_power * 2,
+        }),
         ship_oxygen_level: None,
-        ship_max_oxygen_level: None,
         artillery_weapon: None,
     }
 }
@@ -5229,8 +5241,7 @@ fn ship_manager_desc(
     });
     context::ShipInfo {
         destroyed: mgr.b_destroyed,
-        hull: Help::new(text("tooltip_hull"), mgr.ship.hull_integrity.first),
-        max_hull: mgr.ship.hull_integrity.second,
+        hull: Help::new(text("tooltip_hull"), mgr.ship.hull_integrity.into()),
         evasion_chance_percentage: mgr.dodge_factor(),
         ship_name: mgr.my_blueprint.name.to_str().into_owned(),
         reactor: reactor_state(mgr.i_ship_id),

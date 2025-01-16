@@ -43,56 +43,53 @@ impl_delta!(u8, i8, u16, i16, u32, i32, u64, i64, usize, isize);
 impl_delta!((), bool, String);
 
 #[derive(Eq, PartialEq)]
-pub enum DeltaOrT<'a, T: Delta<'a>> {
+pub enum Opt3<T, Y> {
     None,
-    Delta(T::Delta),
-    T(&'a T),
+    T(T),
+    Y(Y),
 }
 
-impl<'a, T: Delta<'a>> Clone for DeltaOrT<'a, T>
-where
-    T::Delta: Clone,
-{
+impl<'a, T: Clone, Y: Clone> Clone for Opt3<T, Y> {
     fn clone(&self) -> Self {
         match self {
             Self::None => Self::None,
-            Self::Delta(x) => Self::Delta(x.clone()),
-            Self::T(x) => Self::T(x),
+            Self::T(x) => Self::T(x.clone()),
+            Self::Y(y) => Self::Y(y.clone()),
         }
     }
 }
 
-impl<'a, T: std::fmt::Debug + Delta<'a>> std::fmt::Debug for DeltaOrT<'a, T> {
+impl<'a, T: std::fmt::Debug, Y: std::fmt::Debug> std::fmt::Debug for Opt3<T, Y> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::None => f.write_str("DeltaOrT::None"),
-            Self::Delta(x) => write!(f, "DeltaOrT::Delta({x:?})"),
-            Self::T(x) => write!(f, "DeltaOrT::T({x:?})"),
+            Self::None => f.write_str("Opt3::None"),
+            Self::T(x) => write!(f, "Opt3::T({x:?})"),
+            Self::Y(x) => write!(f, "Opt3::Y({x:?})"),
         }
     }
 }
 
-impl<'a, T: Delta<'a> + Serialize> Serialize for DeltaOrT<'a, T> {
+impl<'a, T: Serialize, Y: Serialize> Serialize for Opt3<T, Y> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
         match self {
             Self::None => None::<()>.serialize(serializer),
-            Self::Delta(x) => x.serialize(serializer),
             Self::T(x) => x.serialize(serializer),
+            Self::Y(x) => x.serialize(serializer),
         }
     }
 }
 
 impl<'a, T: 'a + std::fmt::Debug + Serialize + Eq + Delta<'a>> Delta<'a> for Option<T> {
-    type Delta = DeltaOrT<'a, T>;
+    type Delta = Opt3<&'a T, T::Delta>;
     fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
         match (prev, self) {
             (None, None) => None,
-            (Some(old), Some(new)) => new.delta(old).map(DeltaOrT::Delta),
-            (None, Some(x)) => Some(DeltaOrT::T(x)),
-            (Some(_), None) => Some(DeltaOrT::None),
+            (Some(old), Some(new)) => new.delta(old).map(Opt3::Y),
+            (None, Some(x)) => Some(Opt3::T(x)),
+            (Some(_), None) => Some(Opt3::None),
         }
     }
 }
@@ -105,11 +102,14 @@ pub enum Operations<A, B> {
     Changed(B),
 }
 
-impl<'a, T: Clone + std::fmt::Debug + Delta<'a> + HasId<'a> + Serialize> Delta<'a> for Vec<T> {
-    type Delta = Option<Vec<Operations<T, T::Delta>>>;
+impl<'a, T: 'a + Clone + std::fmt::Debug + Delta<'a> + HasId<'a> + Serialize> Delta<'a> for Vec<T> {
+    type Delta = Opt3<Vec<Operations<T, T::Delta>>, &'a [T]>;
     fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
         if self.is_empty() && !prev.is_empty() {
-            return Some(None);
+            return Some(Opt3::None);
+        }
+        if !self.is_empty() && prev.is_empty() {
+            return Some(Opt3::Y(self));
         }
         let mut ret = vec![];
         let mut this: Vec<_> = self.iter().collect();
@@ -153,7 +153,7 @@ impl<'a, T: Clone + std::fmt::Debug + Delta<'a> + HasId<'a> + Serialize> Delta<'
                 },
             }
         }
-        (!ret.is_empty()).then_some(Some(ret))
+        (!ret.is_empty()).then_some(Opt3::T(ret))
     }
 }
 
@@ -284,6 +284,12 @@ macro_rules! impl_quantized {
             type Delta = $ty;
             fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
                 ((self.0 / X) != (prev.0 / X)).then_some(self.0)
+            }
+        }
+
+        impl<const X: $ty> From<$ty> for $name<X> {
+            fn from(x: $ty) -> Self {
+                Self::new(x)
             }
         }
         )+

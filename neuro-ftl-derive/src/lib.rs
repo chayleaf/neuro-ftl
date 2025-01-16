@@ -310,6 +310,7 @@ fn derive_delta2(input: TokenStream) -> TokenStream {
             });
             body1.extend(quote! {
                 let #ident = &self.#ident;
+                changed = changed || #ident != &prev.#ident;
             });
             body2.extend(quote! {
                 #ident,
