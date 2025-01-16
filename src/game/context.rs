@@ -103,7 +103,7 @@ pub struct DroneInfo {
     #[serde(skip_serializing_if = "is_zero")]
     pub dead: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub health: Option<Pair<i32>>,
+    pub health: Option<Pair<QuantizedI32<25>>>,
     // for crew
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<Location>,
@@ -250,7 +250,7 @@ pub struct SystemInfo {
     pub battery_power: Option<Pair<i32>>,
     // for oxygen
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ship_oxygen_level: Option<Pair<i32>>,
+    pub ship_oxygen_level: Option<Pair<QuantizedI32<10>>>,
     // for artillery
     #[serde(skip_serializing_if = "Option::is_none")]
     pub artillery_weapon: Option<WeaponInfo>,
@@ -409,7 +409,7 @@ pub struct CrewInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<Location>,
     pub bonuses: Skills,
-    pub health: Pair<i32>,
+    pub health: Pair<QuantizedI32<25>>,
     // reuse on_fire for this because who cares
     #[serde(skip_serializing_if = "is_zero")]
     pub fighting_fire: bool,

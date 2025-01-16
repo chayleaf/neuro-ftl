@@ -269,7 +269,7 @@ where
 macro_rules! impl_quantized {
     ($(($name:ident, $ty:ty),)+) => {
         $(
-        #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+        #[derive(Copy, Clone, Debug, Serialize)]
         #[serde(transparent)]
         #[repr(transparent)]
         pub struct $name<const X: $ty>(pub $ty);
@@ -278,6 +278,24 @@ macro_rules! impl_quantized {
             pub fn new(val: $ty) -> Self {
                 Self(val)
             }
+        }
+
+        impl<const X: $ty> Ord for $name<X> {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                (self.0 / X).cmp(&(other.0 / X))
+            }
+        }
+        impl<const X: $ty> PartialOrd for $name<X> {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                Some((self.0 / X).cmp(&(other.0 / X)))
+            }
+        }
+        impl<const X: $ty> PartialEq for $name<X> {
+            fn eq(&self, other: &Self) -> bool {
+                self.cmp(other) == std::cmp::Ordering::Equal
+            }
+        }
+        impl<const X: $ty> Eq for $name<X> {
         }
 
         impl<'a, const X: $ty> Delta<'a> for $name<X> {

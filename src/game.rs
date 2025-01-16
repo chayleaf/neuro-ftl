@@ -4219,8 +4219,8 @@ fn crew_desc<'a>(crew: &'a bindings::CrewMember, map: &mut IdMap<'a>) -> context
             }
         },
         health: context::Pair {
-            current: crew.health.first as i32,
-            max: crew.health.second as i32,
+            current: (crew.health.first as i32).into(),
+            max: (crew.health.second as i32).into(),
         },
         fighting_fire: crew.i_on_fire > 0,
         suffocating: crew.b_suffocating,
@@ -4452,8 +4452,8 @@ fn crew_bp_desc<'a>(
             }
         },
         health: context::Pair {
-            current: max_hp,
-            max: max_hp,
+            current: max_hp.into(),
+            max: max_hp.into(),
         },
         fighting_fire: false,
         suffocating: false,
@@ -4496,8 +4496,8 @@ fn drone_desc<'a>(drone: &'a bindings::Drone, map: &mut IdMap<'a>) -> context::D
             let drone = unsafe { &*p_drone.cast::<bindings::CrewDrone>() };
             (
                 Some(context::Pair {
-                    current: drone.base.health.first as i32,
-                    max: drone.base.health.second as i32,
+                    current: (drone.base.health.first as i32).into(),
+                    max: (drone.base.health.second as i32).into(),
                 }),
                 (drone.base.current_ship_id >= 0 && drone.base.i_room_id >= 0).then_some(
                     context::Location {
@@ -4565,7 +4565,10 @@ fn drone_bp_desc<'a>(
         powered: false,
         hacked: false,
         dead: false,
-        health: max_health.map(|x| context::Pair { current: x, max: x }),
+        health: max_health.map(|x| context::Pair {
+            current: x.into(),
+            max: x.into(),
+        }),
         location: None,
         weapon: None,
     }
@@ -4982,8 +4985,8 @@ fn system_desc(system: &bindings::ShipSystem, map: &mut IdMap<'static>) -> conte
         ship_oxygen_level: (sys == System::Oxygen).then(|| {
             let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::OxygenSystem>() };
             context::Pair {
-                current: (system.f_total_oxygen * system.max_oxygen).round() as i32,
-                max: system.max_oxygen.round() as i32,
+                current: ((system.f_total_oxygen * system.max_oxygen).round() as i32).into(),
+                max: (system.max_oxygen.round() as i32).into(),
             }
         }),
         artillery_weapon: (sys == System::Artillery).then(|| {
