@@ -135,6 +135,7 @@ pub struct DeactivateDrone {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct HackSystem {
     pub system: String,
 }
@@ -223,6 +224,7 @@ pub enum InventorySlotType {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct UpgradeSystem {
     pub system: String,
 }
@@ -237,6 +239,7 @@ pub struct FireCrew {
 }
 
 #[derive(Debug, Deserialize, JsonSchemaNoRef)]
+#[serde(rename_all = "camelCase")]
 pub struct InventorySlot {
     #[allow(dead_code)]
     pub r#type: InventorySlotType,
@@ -246,42 +249,50 @@ pub struct InventorySlot {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct SwapInventorySlots {
     pub slot1: InventorySlot,
     pub slot2: InventorySlot,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct Sell {
     pub slot: InventorySlot,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct BuyAugmentation {
     pub augment_name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct BuyWeapon {
     pub weapon_name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct BuyDrone {
     pub drone_name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct BuyCrew {
     pub crew_member_name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct BuyConsumable {
     pub item_name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct BuySystem {
     pub system_name: String,
 }
@@ -325,11 +336,13 @@ impl Direction {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct Jump {
     pub direction: Direction,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ChooseNextSector {
     pub direction: Direction,
 }

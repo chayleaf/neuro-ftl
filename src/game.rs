@@ -5002,7 +5002,7 @@ fn system_bp_desc<'a>(
     faction: ShipId,
     drone_choice: c_int,
 ) -> context::SystemInfo {
-    let sys = System::from_id(system.type_).unwrap();
+    let sys = System::from_name(&system.name.to_str()).unwrap();
     let levels: Vec<_> = system_levels(sys, system.upgrade_costs.as_slice(), 0, system.start_power);
     context::SystemInfo {
         faction,
@@ -5795,6 +5795,9 @@ fn collect_context(app: &CApp) -> context::Context {
                         match t {
                             bindings::StoreType::Crew => {
                                 let b = unsafe { xc(b.cast::<bindings::CrewStoreBox>()).unwrap() };
+                                if b.base.count == 0 {
+                                    continue;
+                                }
                                 page.crew.push(crew_bp_desc(
                                     b.blueprint(),
                                     &mut IdMap::new(),
@@ -5804,6 +5807,9 @@ fn collect_context(app: &CApp) -> context::Context {
                             bindings::StoreType::Weapons => {
                                 let b =
                                     unsafe { xc(b.cast::<bindings::WeaponStoreBox>()).unwrap() };
+                                if b.base.count == 0 {
+                                    continue;
+                                }
                                 page.weapons.push(weapon_bp_desc(
                                     b.blueprint().unwrap(),
                                     &mut IdMap::new(),
@@ -5812,6 +5818,9 @@ fn collect_context(app: &CApp) -> context::Context {
                             }
                             bindings::StoreType::Drones => {
                                 let b = unsafe { xc(b.cast::<bindings::DroneStoreBox>()).unwrap() };
+                                if b.base.count == 0 {
+                                    continue;
+                                }
                                 page.drones.push(drone_bp_desc(
                                     b.blueprint().unwrap(),
                                     &mut IdMap::new(),
@@ -5821,6 +5830,9 @@ fn collect_context(app: &CApp) -> context::Context {
                             bindings::StoreType::Systems => {
                                 let b =
                                     unsafe { xc(b.cast::<bindings::SystemStoreBox>()).unwrap() };
+                                if b.base.count == 0 {
+                                    continue;
+                                }
                                 page.systems.push(system_bp_desc(
                                     b.blueprint().unwrap(),
                                     &mut IdMap::new(),
@@ -5831,6 +5843,9 @@ fn collect_context(app: &CApp) -> context::Context {
                             bindings::StoreType::Augments => {
                                 let b =
                                     unsafe { xc(b.cast::<bindings::AugmentStoreBox>()).unwrap() };
+                                if b.base.count == 0 {
+                                    continue;
+                                }
                                 page.augments.push(augment_bp_desc(
                                     b.blueprint().unwrap(),
                                     &mut IdMap::new(),
@@ -5838,11 +5853,17 @@ fn collect_context(app: &CApp) -> context::Context {
                             }
                             bindings::StoreType::Items => {
                                 let b = unsafe { xc(b.cast::<bindings::ItemStoreBox>()).unwrap() };
+                                if b.base.count == 0 {
+                                    continue;
+                                }
                                 page.items.push(item_bp_desc(b.blueprint().unwrap()));
                             }
                             bindings::StoreType::None => {
                                 let b =
                                     unsafe { xc(b.cast::<bindings::RepairStoreBox>()).unwrap() };
+                                if b.base.count == 0 {
+                                    continue;
+                                }
                                 page.repair
                                     .push(repair_bp_desc(b.repair_all, b.base.desc.cost));
                             }

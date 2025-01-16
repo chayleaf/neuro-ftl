@@ -3884,11 +3884,11 @@ impl StarMap {
         // d2 = 767
         // d3 = sqrt(d2^2 - d1^2)
         let p = self.danger_zone;
-        let d1 = p.y.abs_diff(loc.pos().y);
+        let d1 = (p.y as f64 - loc.loc.y as f64).abs();
         let d2 = 767;
-        let d3 = ((d2 * d2) as f64 - (d1 * d1) as f64).sqrt();
+        let d3 = ((d2 * d2) as f64 - d1 * d1).sqrt();
         // target danger zone x
-        let x1 = loc.pos().x as f64 - d3;
+        let x1 = loc.loc.x as f64 - d3;
         let x0 = p.x as f64;
         let (x0, exp, moves) = if x1 < x0 + exp * k * c as f64 {
             (x0, exp * k, 0.0)
