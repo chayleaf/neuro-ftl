@@ -266,6 +266,40 @@ unsafe fn hook(base: *mut c_void) {
         CRIT_ERR_HDLR.init(base, crit_err_hdlr_hook);
     }
 
+    #[cfg(target_os = "windows")]
+    {
+        static mut EXC_FILTER: OnceLock<
+            retour::GenericDetour<unsafe extern "system" fn(exceptioninfo: *const c_void) -> i32>,
+        > = OnceLock::new();
+        unsafe extern "system" fn exc_filter_hook(exceptioninfo: *const c_void) -> i32 {
+            // EXCEPTION_POINTERS
+            if activated() {
+                deactivate();
+                // EXCEPTION_CONTINUE_EXECUTION
+                // -1
+                // EXCEPTION_CONTINUE_SEARCH
+                0
+            } else {
+                EXC_FILTER.get().unwrap().call(exceptioninfo)
+            }
+        }
+        EXC_FILTER.get_or_init(|| {
+            let addr = base.byte_add(0x4B5A00 - 0x400000);
+            let func = std::mem::transmute::<
+                *mut c_void,
+                Option<unsafe extern "system" fn(exceptioninfo: *const c_void) -> i32>,
+            >(addr);
+            let detour = retour::GenericDetour::new(func.unwrap(), exc_filter_hook)
+                .map_err(|err| format!("failed to hook 0x4B5A00: {err}"))
+                .unwrap();
+            detour
+                .enable()
+                .map_err(|err| format!("failed to enable hook 0x4B5A00: {err}"))
+                .unwrap();
+            detour
+        });
+    }
+
     static mut GEN_INPUT_EVENTS: cross::Hook1<0x402AA0, 0x41C490, *mut CApp, ()> =
         cross::Hook1::new();
 
