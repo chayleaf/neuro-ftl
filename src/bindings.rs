@@ -1033,8 +1033,12 @@ impl<T> Vector<T> {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    pub fn iter(&self) -> impl Iterator<Item = &T> + DoubleEndedIterator {
-        unsafe { std::slice::from_raw_parts(self.start, self.len()) }.iter()
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &T> {
+        if self.start.is_null() {
+            (&[]).iter()
+        } else {
+            unsafe { std::slice::from_raw_parts(self.start, self.len()) }.iter()
+        }
     }
 }
 
@@ -3861,12 +3865,10 @@ impl StarMap {
         if loc.danger_zone {
             return 0.0;
         }
-        let (c, k) = if self.pursuit_delay < 0 {
-            (-self.pursuit_delay, 0.0)
-        } else if self.pursuit_delay > 0 {
-            (self.pursuit_delay, 2.0)
-        } else {
-            (0, 1.0)
+        let (c, k) = match self.pursuit_delay.cmp(&0) {
+            Ordering::Less => (-self.pursuit_delay, 0.0),
+            Ordering::Equal => (0, 1.0),
+            Ordering::Greater => (self.pursuit_delay, 2.0),
         };
         // given:
         // - p1 - danger zone pos

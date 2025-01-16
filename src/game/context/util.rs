@@ -1,8 +1,6 @@
 use serde::Serialize;
 use std::{borrow::Cow, cmp::Ordering, collections::BTreeMap};
 
-use crate::game::strings;
-
 pub trait Delta<'a> {
     type Delta: std::fmt::Debug + Serialize;
     fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta>;
@@ -108,8 +106,11 @@ pub enum Operations<A, B> {
 }
 
 impl<'a, T: Clone + std::fmt::Debug + Delta<'a> + HasId<'a> + Serialize> Delta<'a> for Vec<T> {
-    type Delta = Vec<Operations<T, T::Delta>>;
+    type Delta = Option<Vec<Operations<T, T::Delta>>>;
     fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
+        if self.is_empty() && !prev.is_empty() {
+            return Some(None);
+        }
         let mut ret = vec![];
         let mut this: Vec<_> = self.iter().collect();
         let mut that: Vec<_> = prev.iter().collect();
@@ -118,9 +119,14 @@ impl<'a, T: Clone + std::fmt::Debug + Delta<'a> + HasId<'a> + Serialize> Delta<'
         for x in this.windows(2) {
             if x[0].id() == x[1].id() {
                 #[cfg(debug_assertions)]
-                panic!("duplicate id {ret:?}");
+                panic!(
+                    "duplicate id {:?} {:?}\n{}",
+                    x[0].id(),
+                    x[1].id(),
+                    serde_json::to_string(&this).unwrap()
+                );
                 #[cfg(not(debug_assertions))]
-                log::error!("duplicate id {ret:?}");
+                log::error!("duplicate id {:?} {:?}", x[0].id(), x[1].id());
             }
         }
         let mut this = this.into_iter().peekable();
@@ -147,7 +153,7 @@ impl<'a, T: Clone + std::fmt::Debug + Delta<'a> + HasId<'a> + Serialize> Delta<'
                 },
             }
         }
-        (!ret.is_empty()).then_some(ret)
+        (!ret.is_empty()).then_some(Some(ret))
     }
 }
 
@@ -170,22 +176,22 @@ impl<
                     ret.insert(k.clone(), Operations::Removed(v.clone()));
                 }
                 (Some(_), None) => {
-                    let (k, v) = this.next().unwrap().clone();
+                    let (k, v) = this.next().unwrap();
                     ret.insert(k.clone(), Operations::Added(v.clone()));
                 }
                 (Some(x), Some(y)) => match x.0.cmp(y.0) {
                     Ordering::Less => {
-                        let (k, v) = this.next().unwrap().clone();
+                        let (k, v) = this.next().unwrap();
                         ret.insert(k.clone(), Operations::Added(v.clone()));
                     }
                     Ordering::Greater => {
-                        let (k, v) = that.next().unwrap().clone();
+                        let (k, v) = that.next().unwrap();
                         ret.insert(k.clone(), Operations::Removed(v.clone()));
                     }
                     Ordering::Equal => {
                         let (k, a) = this.next().unwrap();
                         let (_, b) = that.next().unwrap();
-                        if let Some(delta) = a.delta(&b) {
+                        if let Some(delta) = a.delta(b) {
                             ret.insert(k.clone(), Operations::Changed(delta));
                         }
                     }
@@ -208,7 +214,7 @@ where
 }
 
 pub trait HasId<'a> {
-    type Id: Ord;
+    type Id: Ord + std::fmt::Debug;
     /// Unique string ID for Neuro to refer to this item by. For crew, this is the crewmember name,
     /// for weapons, this is the weapon name, for systems, this is the system ID, for drones, this
     /// the augment name, for rooms, there's nothing (I could use system IDs but there's way too
@@ -242,21 +248,11 @@ impl<T> Help<T> {
             help: help.into(),
         }
     }
-    pub fn set(&mut self, val: T) {
-        debug_assert_ne!(self.help.as_ref(), strings::BUG);
-        self.value = val;
-    }
 }
 
 impl<T: From<bool> + PartialEq> Help<T> {
     pub fn is_zero(&self) -> bool {
         self.value == T::from(false)
-    }
-}
-
-impl<T> Help<Option<T>> {
-    pub fn is_none(&self) -> bool {
-        self.value.is_none()
     }
 }
 
@@ -278,6 +274,7 @@ macro_rules! impl_quantized {
         #[repr(transparent)]
         pub struct $name<const X: $ty>(pub $ty);
         impl<const X: $ty> $name<X> {
+            #[allow(unused)]
             pub fn new(val: $ty) -> Self {
                 Self(val)
             }

@@ -95,7 +95,9 @@ pub struct DecreasePower {
 #[derive(Copy, Clone, Debug, Deserialize, Eq, PartialEq, JsonSchemaNoRef)]
 #[serde(rename_all = "snake_case")]
 pub enum TargetShip {
+    #[allow(dead_code)]
     Player,
+    #[allow(dead_code)]
     Enemy,
 }
 
@@ -206,11 +208,17 @@ pub struct Back;
 #[derive(Debug, Deserialize, JsonSchemaNoRef)]
 #[serde(rename_all = "snake_case")]
 pub enum InventorySlotType {
+    #[allow(dead_code)]
     Weapon,
+    #[allow(dead_code)]
     Drone,
+    #[allow(dead_code)]
     Cargo,
+    #[allow(dead_code)]
     OverCapacity,
+    #[allow(dead_code)]
     Augmentation,
+    #[allow(dead_code)]
     AugmentationOverCapacity,
 }
 
@@ -230,8 +238,10 @@ pub struct FireCrew {
 
 #[derive(Debug, Deserialize, JsonSchemaNoRef)]
 pub struct InventorySlot {
+    #[allow(dead_code)]
     pub r#type: InventorySlotType,
     // must be max 3 normally and 2 for augmentations
+    #[allow(dead_code)]
     pub index: u8,
 }
 
@@ -281,13 +291,21 @@ pub struct BuySystem {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum Direction {
+    #[allow(dead_code)]
     TopLeft,
+    #[allow(dead_code)]
     Left,
+    #[allow(dead_code)]
     BottomLeft,
+    #[allow(dead_code)]
     Top,
+    #[allow(dead_code)]
     Bottom,
+    #[allow(dead_code)]
     TopRight,
+    #[allow(dead_code)]
     Right,
+    #[allow(dead_code)]
     BottomRight,
 }
 

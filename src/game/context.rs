@@ -5,8 +5,6 @@ use serde::Serialize;
 
 use crate::impl_delta;
 
-use super::strings::{self, text};
-
 pub mod util;
 
 use util::*;
@@ -18,7 +16,7 @@ pub use util::Help;
 pub struct WeaponInfo {
     #[serde(skip_serializing_if = "String::is_empty")]
     #[delta1]
-    pub name: String,
+    pub weapon_name: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub description: String,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -29,6 +27,7 @@ pub struct WeaponInfo {
     pub cost: i32,
     #[serde(skip_serializing_if = "is_zero")]
     pub rarity: i32,
+    #[delta1]
     pub faction: ShipId,
     #[serde(skip_serializing_if = "is_zero")]
     pub damage: i32,
@@ -80,7 +79,7 @@ pub struct WeaponInfo {
 pub struct DroneInfo {
     #[serde(skip_serializing_if = "String::is_empty")]
     #[delta1]
-    pub name: String,
+    pub drone_name: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub description: String,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -91,6 +90,7 @@ pub struct DroneInfo {
     pub cost: i32,
     #[serde(skip_serializing_if = "is_zero")]
     pub rarity: i32,
+    #[delta1]
     pub faction: ShipId,
     #[serde(skip_serializing_if = "is_zero")]
     pub required_power: i32,
@@ -117,7 +117,7 @@ pub struct DroneInfo {
 pub struct AugmentInfo {
     #[serde(skip_serializing_if = "String::is_empty")]
     #[delta1]
-    pub name: String,
+    pub augment_name: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub description: String,
     #[serde(skip_serializing_if = "is_zero")]
@@ -131,7 +131,7 @@ pub struct AugmentInfo {
 pub struct ItemInfo {
     #[serde(skip_serializing_if = "String::is_empty")]
     #[delta1]
-    pub name: String,
+    pub item_name: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub description: String,
     #[serde(skip_serializing_if = "is_zero")]
@@ -146,7 +146,7 @@ pub struct ItemInfo {
 pub struct RepairInfo {
     #[serde(skip_serializing_if = "str::is_empty")]
     #[delta1]
-    pub name: &'static str,
+    pub repair_name: &'static str,
     #[serde(skip_serializing_if = "str::is_empty")]
     pub description: &'static str,
     #[serde(skip_serializing_if = "is_zero")]
@@ -187,11 +187,7 @@ pub struct ReactorState {
 #[serde(rename_all = "camelCase")]
 pub struct SystemInfo {
     #[delta1]
-    pub faction: ShipId,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub room_id: Option<u32>,
-    #[delta1]
-    pub name: Cow<'static, str>,
+    pub system_name: Cow<'static, str>,
     pub description: Cow<'static, str>,
     #[delta1]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -201,6 +197,10 @@ pub struct SystemInfo {
     pub cost: i32,
     #[serde(skip_serializing_if = "is_zero")]
     pub rarity: i32,
+    #[delta1]
+    pub faction: ShipId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub room_id: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hp: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -302,12 +302,16 @@ pub struct DoorInfoShort {
 #[derive(Clone, Debug, Serialize, Delta, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RoomInfo {
+    #[delta1]
     pub faction: ShipId,
     #[delta1]
     pub room_id: u32,
     pub doors: Vec<DoorInfoShort>,
     pub crew_member_names: Vec<String>,
     pub intruder_names: Vec<String>,
+    #[delta1]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_name: Option<String>,
     #[serde(skip_serializing_if = "is_zero")]
     pub fire_level: i32,
     pub oxygen_percentage: i32,
@@ -318,6 +322,7 @@ pub struct RoomInfo {
 #[derive(Clone, Debug, Serialize, Delta, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DoorInfo {
+    #[delta1]
     pub faction: ShipId,
     #[delta1]
     pub door_id: i32,
@@ -411,8 +416,9 @@ pub struct Skills {
 #[serde(rename_all = "camelCase")]
 pub struct CrewInfo {
     #[delta1]
-    pub name: String,
+    pub crew_member_name: String,
     pub species: Species,
+    #[delta1]
     pub faction: ShipId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<Location>,
@@ -465,14 +471,12 @@ pub struct ShipInfo {
 #[derive(Clone, Debug, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum AnyItemInfo {
-    #[allow(dead_code)]
     Weapon(WeaponInfo),
-    #[allow(dead_code)]
     Drone(DroneInfo),
 }
 
 impl<'a> HasId<'a> for AnyItemInfo {
-    type Id = (&'a String,);
+    type Id = (&'a String, &'a ShipId);
     fn id(&'a self) -> Self::Id {
         match self {
             Self::Weapon(x) => x.id(),
@@ -505,12 +509,9 @@ pub struct Inventory {
 #[derive(Clone, Debug, Serialize, Eq, PartialEq, Ord, PartialOrd)]
 #[serde(rename_all = "snake_case")]
 pub enum InventorySlotType {
-    #[allow(dead_code)]
     OverCapacity,
-    #[allow(dead_code)]
     AugmentationOverCapacity,
     Weapon,
-    #[allow(dead_code)]
     Cargo,
     Drone,
     Augmentation,
@@ -523,7 +524,6 @@ pub struct ItemSlot<T: for<'a> Delta<'a, Delta: Clone> + Eq + Serialize + std::f
     pub r#type: InventorySlotType,
     #[delta1]
     pub index: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub contents: Option<T>,
 }
 
@@ -547,39 +547,17 @@ impl<T: for<'a> Delta<'a, Delta: Clone> + Eq + Serialize + std::fmt::Debug> Item
     }
 }
 
-impl Inventory {
-    pub fn new() -> Self {
-        Self {
-            // hull: Help::new(text("tooltip_hull"), 0),
-            // max_hull: 0,
-            drone_part_count: Help::new(text("tooltip_droneCount"), 0),
-            fuel_count: Help::new(text("tooltip_fuelCount"), 0),
-            missile_count: Help::new(text("tooltip_missileCount"), 0),
-            scrap_count: Help::new(text("tooltip_scrapCount"), 0),
-            overcapacity_slot: ItemSlot {
-                r#type: InventorySlotType::OverCapacity,
-                index: 0,
-                contents: None,
-            },
-            augment_overcapacity_slot: ItemSlot {
-                r#type: InventorySlotType::AugmentationOverCapacity,
-                index: 0,
-                contents: None,
-            },
-            cargo_slots: vec![],
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default, Serialize, Delta, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ShipDesc {
     #[delta1]
-    pub name: String,
+    pub layout_id: usize,
+    #[delta1]
+    pub layout_variation_id: usize,
+    #[delta1]
+    pub ship_name: String,
     pub class: String,
     pub description: String,
-    pub layout_id: usize,
-    pub layout_variation_id: usize,
     #[serde(skip_serializing_if = "is_zero")]
     pub unlocked: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -591,8 +569,8 @@ pub struct ShipDesc {
 pub struct Context {
     #[serde(skip_serializing_if = "String::is_empty")]
     pub confirmation_message: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub event_text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_text: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub event_options: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -654,23 +632,11 @@ pub enum Direction {
     BottomRight,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Difficulty {
-    #[allow(dead_code)]
-    Easy,
-    #[allow(dead_code)]
-    Normal,
-    #[allow(dead_code)]
-    Hard,
-}
-
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ShipId {
     Player,
     Enemy,
-    #[allow(dead_code)]
-    AllShips,
 }
 
 #[derive(Clone, Debug, Serialize, Delta)]
@@ -801,49 +767,15 @@ pub struct CurrentLocationInfo {
     pub planetary_defense_system_all: Help<bool>,
 }
 
-impl LocationInfo {
-    pub fn new_map() -> Self {
-        Self {
-            map_position: Point::default(),
-            map_routes: BTreeMap::new(),
-            current: Help::new(text("map_current_loc"), false),
-            boss: Help::new(text("map_boss_loc"), false),
-            boss_comes_in: Help::new(strings::LOC_BOSS1, 0),
-            base: Help::new(text("map_base_loc"), false),
-            exit: Help::new(text("map_exit_loc"), false),
-            rebels: Help::new(text("map_rebels_loc"), false),
-            store: Help::new(text("map_store_loc"), false),
-            repair: Help::new(text("map_repair_loc"), false),
-            fleet: Help::new(text("map_fleet_loc"), false),
-            fleet_comes_in: Help::new(strings::LOC_FLEET1, 0.0),
-            hostile: Help::new(text("map_hostile_loc"), false),
-            nothing: Help::new(text("map_nothing_loc"), false),
-            distress: Help::new(text("map_distress_loc"), false),
-            ship: Help::new(text("map_ship_loc"), false),
-            quest: Help::new(text("map_quest_loc"), false),
-            merchant: Help::new(text("map_merchant_loc"), false),
-            unvisited: Help::new(text("map_unvisited_loc"), false),
-            nebula_fleet: Help::new(strings::LOC_NEBULA_FLEET, false),
-            nebula: Help::new(text("map_nebula_loc"), false),
-            asteroids: Help::new(text("map_asteroid_loc"), false),
-            sun: Help::new(text("map_sun_loc"), false),
-            ion: Help::new(text("map_ion_loc"), false),
-            pulsar: Help::new(text("map_pulsar_loc"), false),
-            planetary_defense_system: Help::new(text("map_pds_loc"), false),
-            planetary_defense_system_fleet: Help::new(text("map_pds_fleet"), false),
-        }
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Delta)]
 #[serde(rename_all = "camelCase")]
 pub struct SectorInfo {
     #[delta1]
     pub map_position: Point<i32>,
-    pub map_routes: BTreeMap<Direction, Point<i32>>,
     // only add this if this is immediately reachable
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
+    pub sector_name: Option<String>,
+    pub map_routes: BTreeMap<Direction, Point<i32>>,
     #[serde(skip_serializing_if = "is_zero")]
     pub hostile: bool,
     #[serde(skip_serializing_if = "is_zero")]

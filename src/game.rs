@@ -369,6 +369,9 @@ impl neuro_sama::game::GameMut for State {
                         .flat_map(|(i, x)| {
                             let ship_name = &event.ship_name;
                             x.into_iter().enumerate().filter_map(move |(j, x)| {
+                                if ship_name == "should not be seen" {
+                                    return None;
+                                }
                                 let unlocked = unsafe {
                                     (**(*crate::ACHIEVEMENTS.0)
                                         .ship_unlocks
@@ -382,7 +385,7 @@ impl neuro_sama::game::GameMut for State {
                                     return None;
                                 }
                                 let bp = unsafe { xb(x) }?;
-                                (ship_name == &bp.desc.title.to_str()).then_some((i, j, unlocked))
+                                (ship_name == &bp.name.to_str()).then_some((i, j, unlocked))
                             })
                         })
                         .next()
@@ -405,7 +408,8 @@ impl neuro_sama::game::GameMut for State {
                             .into_iter()
                             .flatten()
                             .filter_map(|x| unsafe { xb(x) })
-                            .map(|x| serde_json::Value::String(x.desc.title.to_str().into_owned()))
+                            .filter(|x| x.name.to_str() != "should not be seen")
+                            .map(|x| serde_json::Value::String(x.name.to_str().into_owned()))
                             .collect();
                         Err(Cow::from(format!(
                             "the ship was not found, available ship names: {}",
@@ -3215,7 +3219,6 @@ fn available_actions(app: &CApp) -> ActionDb {
         if app.menu.ship_builder.b_open {
             let s = &app.menu.ship_builder;
             // TODO: (?) difficulty selection actions, enable advanced edition action
-            let mut m = meta::<actions::RenameCrew>();
             let names = IdMap::with(|map| {
                 s.v_crew_boxes
                     .iter()
@@ -3228,18 +3231,24 @@ fn available_actions(app: &CApp) -> ActionDb {
                     })
                     .collect::<Vec<_>>()
             });
-            add_enum(prop(&mut m.schema, "oldName"), names);
-            ret.actions.insert(actions::RenameCrew::name(), m);
-            let mut meta = meta::<actions::SelectShip>();
-            let names = s
+            if !names.is_empty() {
+                let mut m = meta::<actions::RenameCrew>();
+                add_enum(prop(&mut m.schema, "oldName"), names);
+                ret.actions.insert(actions::RenameCrew::name(), m);
+            }
+            let names: Vec<_> = s
                 .ships
                 .into_iter()
                 .flatten()
                 .filter_map(|x| unsafe { xb(x) })
-                .map(|x| serde_json::Value::String(x.desc.title.to_str().into_owned()))
+                .filter(|x| x.name.to_str() != "should not be seen")
+                .map(|x| serde_json::Value::String(x.name.to_str().into_owned()))
                 .collect();
-            add_enum(prop(&mut meta.schema, "shipName"), names);
-            ret.actions.insert(actions::SelectShip::name(), meta);
+            if !names.is_empty() {
+                let mut meta = meta::<actions::SelectShip>();
+                add_enum(prop(&mut meta.schema, "shipName"), names);
+                ret.actions.insert(actions::SelectShip::name(), meta);
+            }
             ret.add::<actions::RenameShip>();
             ret.add::<actions::StartGame>();
             return ret;
@@ -3414,18 +3423,22 @@ fn available_actions(app: &CApp) -> ActionDb {
                 "augmentation_over_capacity".to_owned(),
             ));
         }
-        let mut meta = meta::<actions::SwapInventorySlots>();
-        add_enum(
-            prop1(prop(&mut meta.schema, "slot1"), "type"),
-            categories.clone(),
-        );
-        add_enum(
-            prop1(prop(&mut meta.schema, "slot2"), "type"),
-            categories.clone(),
-        );
-        ret.actions
-            .insert(actions::SwapInventorySlots::name(), meta);
-        Some(categories)
+        if !categories.is_empty() {
+            let mut meta = meta::<actions::SwapInventorySlots>();
+            add_enum(
+                prop1(prop(&mut meta.schema, "slot1"), "type"),
+                categories.clone(),
+            );
+            add_enum(
+                prop1(prop(&mut meta.schema, "slot2"), "type"),
+                categories.clone(),
+            );
+            ret.actions
+                .insert(actions::SwapInventorySlots::name(), meta);
+            Some(categories)
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -3437,7 +3450,7 @@ fn available_actions(app: &CApp) -> ActionDb {
             .unwrap()
             .store()
             .unwrap();
-        if let Some(categories) = categories {
+        if let Some(categories) = categories.filter(|x| !x.is_empty()) {
             let mut meta = meta::<actions::Sell>();
             add_enum(prop1(prop(&mut meta.schema, "slot"), "type"), categories);
             ret.actions.insert(actions::Sell::name(), meta);
@@ -3450,7 +3463,6 @@ fn available_actions(app: &CApp) -> ActionDb {
             }
             ret.add::<actions::SellScreen>();
             {
-                let mut meta = meta::<actions::BuyAugmentation>();
                 let boxes = store.active_boxes::<bindings::AugmentStoreBox>();
                 if !boxes.is_empty() {
                     let augments: Vec<_> = IdMap::with(|map| {
@@ -3465,12 +3477,14 @@ fn available_actions(app: &CApp) -> ActionDb {
                             })
                             .collect()
                     });
-                    add_enum(prop(&mut meta.schema, "augmentName"), augments);
-                    ret.actions.insert(actions::BuyAugmentation::name(), meta);
+                    if !augments.is_empty() {
+                        let mut meta = meta::<actions::BuyAugmentation>();
+                        add_enum(prop(&mut meta.schema, "augmentName"), augments);
+                        ret.actions.insert(actions::BuyAugmentation::name(), meta);
+                    }
                 }
             }
             {
-                let mut meta = meta::<actions::BuySystem>();
                 let boxes = store.active_boxes::<bindings::SystemStoreBox>();
                 if !boxes.is_empty() {
                     let systems: Vec<_> = IdMap::with(|map| {
@@ -3485,12 +3499,14 @@ fn available_actions(app: &CApp) -> ActionDb {
                             })
                             .collect()
                     });
-                    add_enum(prop(&mut meta.schema, "systemName"), systems);
-                    ret.actions.insert(actions::BuySystem::name(), meta);
+                    if !systems.is_empty() {
+                        let mut meta = meta::<actions::BuySystem>();
+                        add_enum(prop(&mut meta.schema, "systemName"), systems);
+                        ret.actions.insert(actions::BuySystem::name(), meta);
+                    }
                 }
             }
             {
-                let mut meta = meta::<actions::BuyWeapon>();
                 let boxes = store.active_boxes::<bindings::WeaponStoreBox>();
                 if !boxes.is_empty() {
                     let weapons: Vec<_> = IdMap::with(|map| {
@@ -3505,12 +3521,14 @@ fn available_actions(app: &CApp) -> ActionDb {
                             })
                             .collect()
                     });
-                    add_enum(prop(&mut meta.schema, "weaponName"), weapons);
-                    ret.actions.insert(actions::BuyWeapon::name(), meta);
+                    if !weapons.is_empty() {
+                        let mut meta = meta::<actions::BuyWeapon>();
+                        add_enum(prop(&mut meta.schema, "weaponName"), weapons);
+                        ret.actions.insert(actions::BuyWeapon::name(), meta);
+                    }
                 }
             }
             {
-                let mut meta = meta::<actions::BuyDrone>();
                 let boxes = store.active_boxes::<bindings::DroneStoreBox>();
                 if !boxes.is_empty() {
                     let drones: Vec<_> = IdMap::with(|map| {
@@ -3525,12 +3543,14 @@ fn available_actions(app: &CApp) -> ActionDb {
                             })
                             .collect()
                     });
-                    add_enum(prop(&mut meta.schema, "droneName"), drones);
-                    ret.actions.insert(actions::BuyDrone::name(), meta);
+                    if !drones.is_empty() {
+                        let mut meta = meta::<actions::BuyDrone>();
+                        add_enum(prop(&mut meta.schema, "droneName"), drones);
+                        ret.actions.insert(actions::BuyDrone::name(), meta);
+                    }
                 }
             }
             {
-                let mut meta = meta::<actions::BuyCrew>();
                 let boxes = store.active_boxes::<bindings::CrewStoreBox>();
                 if !boxes.is_empty() {
                     let crew: Vec<_> = IdMap::with(|map| {
@@ -3546,12 +3566,14 @@ fn available_actions(app: &CApp) -> ActionDb {
                             })
                             .collect()
                     });
-                    add_enum(prop(&mut meta.schema, "crewMemberName"), crew);
-                    ret.actions.insert(actions::BuyCrew::name(), meta);
+                    if !crew.is_empty() {
+                        let mut meta = meta::<actions::BuyCrew>();
+                        add_enum(prop(&mut meta.schema, "crewMemberName"), crew);
+                        ret.actions.insert(actions::BuyCrew::name(), meta);
+                    }
                 }
             }
             {
-                let mut meta = meta::<actions::BuyConsumable>();
                 let boxes = store.active_boxes::<bindings::ItemStoreBox>();
                 if !boxes.is_empty() {
                     let weapons: Vec<_> = IdMap::with(|map| {
@@ -3566,8 +3588,11 @@ fn available_actions(app: &CApp) -> ActionDb {
                             })
                             .collect()
                     });
-                    add_enum(prop(&mut meta.schema, "itemName"), weapons);
-                    ret.actions.insert(actions::BuyWeapon::name(), meta);
+                    if !weapons.is_empty() {
+                        let mut meta = meta::<actions::BuyConsumable>();
+                        add_enum(prop(&mut meta.schema, "itemName"), weapons);
+                        ret.actions.insert(actions::BuyWeapon::name(), meta);
+                    }
                 }
             }
             let boxes = store.active_boxes::<bindings::RepairStoreBox>();
@@ -3610,12 +3635,14 @@ fn available_actions(app: &CApp) -> ActionDb {
                     })
                     .collect::<Vec<_>>()
             });
-            let mut m = meta::<actions::RenameCrew>();
-            add_enum(prop(&mut m.schema, "oldName"), names.clone());
-            ret.actions.insert(actions::RenameCrew::name(), m);
-            let mut m = meta::<actions::FireCrew>();
-            add_enum(prop(&mut m.schema, "name"), names);
-            ret.actions.insert(actions::FireCrew::name(), m);
+            if !names.is_empty() {
+                let mut m = meta::<actions::RenameCrew>();
+                add_enum(prop(&mut m.schema, "oldName"), names.clone());
+                ret.actions.insert(actions::RenameCrew::name(), m);
+                let mut m = meta::<actions::FireCrew>();
+                add_enum(prop(&mut m.schema, "name"), names);
+                ret.actions.insert(actions::FireCrew::name(), m);
+            }
         }
         if gui.equip_screen.base.b_open {
             ret.add::<actions::SwapInventorySlots>();
@@ -3640,9 +3667,11 @@ fn available_actions(app: &CApp) -> ActionDb {
                     ));
                 }
             });
-            let mut meta = meta::<actions::UpgradeSystem>();
-            add_enum(prop(&mut meta.schema, "system"), systems);
-            ret.actions.insert(actions::UpgradeSystem::name(), meta);
+            if !systems.is_empty() {
+                let mut meta = meta::<actions::UpgradeSystem>();
+                add_enum(prop(&mut meta.schema, "system"), systems);
+                ret.actions.insert(actions::UpgradeSystem::name(), meta);
+            }
             if gui.upgrade_screen.undo_button.base.b_active {
                 ret.add::<actions::UndoUpgrades>();
             }
@@ -3811,7 +3840,6 @@ fn available_actions(app: &CApp) -> ActionDb {
     if let Some(sys) = gui.ship_manager().unwrap().hacking_system() {
         if !sys.b_hacking {
             if let Some(target) = gui.combat_control.current_target() {
-                let mut meta = meta::<actions::HackSystem>();
                 let systems = IdMap::with(|map| {
                     target
                         .ship_manager()
@@ -3833,8 +3861,11 @@ fn available_actions(app: &CApp) -> ActionDb {
                         })
                         .collect::<Vec<_>>()
                 });
-                add_enum(prop(&mut meta.schema, "system"), systems);
-                ret.actions.insert(actions::HackSystem::name(), meta);
+                if !systems.is_empty() {
+                    let mut meta = meta::<actions::HackSystem>();
+                    add_enum(prop(&mut meta.schema, "system"), systems);
+                    ret.actions.insert(actions::HackSystem::name(), meta);
+                }
             }
         } else if sys.base.i_lock_count == 0 {
             ret.add::<actions::ActivateHacking>();
@@ -3936,9 +3967,11 @@ fn available_actions(app: &CApp) -> ActionDb {
             })
             .collect::<Vec<_>>()
     });
-    let mut m = meta::<actions::MoveCrew>();
-    add_enum(array_item(prop(&mut m.schema, "crewMemberNames")), names);
-    ret.actions.insert(actions::MoveCrew::name(), m);
+    if !names.is_empty() {
+        let mut m = meta::<actions::MoveCrew>();
+        add_enum(array_item(prop(&mut m.schema, "crewMemberNames")), names);
+        ret.actions.insert(actions::MoveCrew::name(), m);
+    }
     let names1 = IdMap::with(|map| {
         app.gui()
             .unwrap()
@@ -3969,6 +4002,7 @@ fn room_desc(
     door_map: &[Vec<context::DoorInfoShort>],
     crew_map: &[Vec<String>],
     intruder_map: &[Vec<String>],
+    system_map: &[Option<String>],
 ) -> context::RoomInfo {
     context::RoomInfo {
         faction: if room.i_ship_id == 0 {
@@ -3989,6 +4023,9 @@ fn room_desc(
             .get(room.i_room_id as usize)
             .cloned()
             .unwrap_or_default(),
+        system_name: system_map
+            .get(room.i_room_id as usize)
+            .and_then(|x| x.clone()),
         fire_level: room.i_fire_count,
         oxygen_percentage: mgr
             .oxygen_system()
@@ -4017,7 +4054,7 @@ fn door_desc(door: &bindings::Door) -> context::DoorInfo {
 fn crew_desc<'a>(crew: &'a bindings::CrewMember, map: &mut IdMap<'a>) -> context::CrewInfo {
     let species = context::Species::from_id(&crew.species.to_str());
     context::CrewInfo {
-        name: map.map(crew.blueprint.crew_name_long.to_str()).into_owned(),
+        crew_member_name: map.map(crew.blueprint.crew_name_long.to_str()).into_owned(),
         // same as blueprint.name
         species,
         faction: if crew.i_ship_id == 0 {
@@ -4234,7 +4271,7 @@ fn crew_bp_desc<'a>(
         _ => 100,
     };
     context::CrewInfo {
-        name: map.map(crew.crew_name_long.to_str()).into_owned(),
+        crew_member_name: map.map(crew.crew_name_long.to_str()).into_owned(),
         // same as blueprint.name
         species,
         faction,
@@ -4459,7 +4496,7 @@ fn drone_desc<'a>(drone: &'a bindings::Drone, map: &mut IdMap<'a>) -> context::D
         None => (None, None, None, None),
     };
     context::DroneInfo {
-        name: map.map(bp.desc.title.to_str()).into_owned(),
+        drone_name: map.map(bp.desc.title.to_str()).into_owned(),
         description: bp.desc.description.to_str().into_owned(),
         tooltip: bp.desc.tooltip.to_str().into_owned(),
         tip: bp.desc.tip.to_str().into_owned(),
@@ -4497,7 +4534,7 @@ fn drone_bp_desc<'a>(
         None => None,
     };
     context::DroneInfo {
-        name: map.map(drone.desc.title.to_str()).into_owned(),
+        drone_name: map.map(drone.desc.title.to_str()).into_owned(),
         description: drone.desc.description.to_str().into_owned(),
         tooltip: drone.desc.tooltip.to_str().into_owned(),
         tip: drone.desc.tip.to_str().into_owned(),
@@ -4523,7 +4560,7 @@ fn weapon_bp_desc<'a>(
     faction: ShipId,
 ) -> context::WeaponInfo {
     context::WeaponInfo {
-        name: map.map(weapon.desc.title.to_str()).into_owned(),
+        weapon_name: map.map(weapon.desc.title.to_str()).into_owned(),
         description: weapon.desc.description.to_str().into_owned(),
         tooltip: weapon.desc.tooltip.to_str().into_owned(),
         tip: weapon.desc.tip.to_str().into_owned(),
@@ -4538,9 +4575,9 @@ fn weapon_bp_desc<'a>(
             .unwrap_or_default(),
         missiles_per_shot: weapon.missiles,
         shield_piercing: weapon.damage.i_shield_piercing,
-        fire_chance_percentage: weapon.damage.fire_chance,
-        breach_chance_percentage: weapon.damage.breach_chance,
-        stun_chance_percentage: weapon.damage.stun_chance,
+        fire_chance_percentage: weapon.damage.fire_chance * 10,
+        breach_chance_percentage: weapon.damage.breach_chance * 10,
+        stun_chance_percentage: weapon.damage.stun_chance * 10,
         stun_duration: weapon.damage.i_stun,
         ion_damage: weapon.damage.i_ion_damage,
         system_damage: weapon.damage.i_system_damage,
@@ -4566,7 +4603,7 @@ fn weapon_desc<'a>(
 ) -> context::WeaponInfo {
     let bp = weapon.blueprint().unwrap();
     context::WeaponInfo {
-        name: map.map(bp.desc.title.to_str()).into_owned(),
+        weapon_name: map.map(bp.desc.title.to_str()).into_owned(),
         description: bp.desc.description.to_str().into_owned(),
         tooltip: bp.desc.tooltip.to_str().into_owned(),
         tip: bp.desc.tip.to_str().into_owned(),
@@ -4585,9 +4622,9 @@ fn weapon_desc<'a>(
             .unwrap_or_default(),
         missiles_per_shot: bp.missiles,
         shield_piercing: bp.damage.i_shield_piercing,
-        fire_chance_percentage: bp.damage.fire_chance,
-        breach_chance_percentage: bp.damage.breach_chance,
-        stun_chance_percentage: bp.damage.stun_chance,
+        fire_chance_percentage: bp.damage.fire_chance * 10,
+        breach_chance_percentage: bp.damage.breach_chance * 10,
+        stun_chance_percentage: bp.damage.stun_chance * 10,
         stun_duration: bp.damage.i_stun,
         ion_damage: bp.damage.i_ion_damage,
         system_damage: bp.damage.i_system_damage,
@@ -4764,7 +4801,7 @@ fn system_desc(system: &bindings::ShipSystem, map: &mut IdMap<'static>) -> conte
         cost: bp.cost as i32,
         rarity: bp.rarity as i32,
         room_id: system.room_id.try_into().ok(),
-        name: map.map(bp.title.to_str().into()),
+        system_name: map.map(bp.title.to_str().into()),
         description: bp.desc.to_str().into(),
         tooltip: (sys != System::Artillery).then(|| sys.tooltip(system.i_ship_id != 0)),
         hp: Some(system.health_state.first),
@@ -4951,7 +4988,7 @@ fn system_bp_desc<'a>(
         cost: system.desc.cost,
         rarity: system.desc.rarity,
         room_id: None,
-        name: map.map(system.desc.title.to_str()).into_owned().into(),
+        system_name: map.map(system.desc.title.to_str()).into_owned().into(),
         description: system.desc.description.to_str().into_owned().into(),
         tooltip: (sys != System::Artillery).then(|| sys.tooltip(faction == ShipId::Enemy)),
         hp: None,
@@ -5044,7 +5081,7 @@ fn augment_bp1_desc(
     map: &mut IdMap<'static>,
 ) -> context::AugmentInfo {
     context::AugmentInfo {
-        name: map.map(aug.title.to_str().into()).into_owned(),
+        augment_name: map.map(aug.title.to_str().into()).into_owned(),
         description: aug.desc.to_str().to_owned(),
         cost: aug.cost as i32,
         rarity: aug.rarity as i32,
@@ -5056,7 +5093,7 @@ fn augment_bp_desc(
     map: &mut IdMap<'static>,
 ) -> context::AugmentInfo {
     context::AugmentInfo {
-        name: map.map(aug.desc.title.to_str()).into_owned(),
+        augment_name: map.map(aug.desc.title.to_str()).into_owned(),
         description: aug.desc.description.to_str().into_owned(),
         cost: aug.desc.cost,
         rarity: aug.desc.rarity,
@@ -5065,7 +5102,7 @@ fn augment_bp_desc(
 
 fn item_bp_desc(item: &bindings::ItemBlueprint) -> context::ItemInfo {
     context::ItemInfo {
-        name: item.base.desc.title.to_str().into_owned(),
+        item_name: item.base.desc.title.to_str().into_owned(),
         description: item.base.desc.description.to_str().into_owned(),
         cost: item.base.desc.cost,
         rarity: item.base.desc.rarity,
@@ -5074,7 +5111,7 @@ fn item_bp_desc(item: &bindings::ItemBlueprint) -> context::ItemInfo {
 
 fn repair_bp_desc(repair_all: bool, cost: i32) -> context::RepairInfo {
     context::RepairInfo {
-        name: if repair_all {
+        repair_name: if repair_all {
             text("repair_all_title")
         } else {
             text("repair_one_title")
@@ -5173,12 +5210,29 @@ fn ship_manager_desc(
             })
         })
         .unwrap_or_default();
+    let system_map = IdMap::with(|map| {
+        mgr.v_system_list
+            .iter()
+            .filter_map(|x| unsafe { xc(*x) })
+            .fold(Vec::<Option<_>>::new(), |mut ret, system| {
+                if let Ok(idx) = usize::try_from(system.room_id) {
+                    if idx >= ret.len() {
+                        ret.resize(idx + 1, None);
+                    }
+                    let sys = System::from_id(system.i_system_type).unwrap();
+                    let bp = sys.blueprint().unwrap();
+                    *ret.get_mut(idx).unwrap() =
+                        Some(map.map(bp.title.to_str().into()).into_owned());
+                }
+                ret
+            })
+    });
     context::ShipInfo {
         destroyed: mgr.b_destroyed,
         hull: Help::new(text("tooltip_hull"), mgr.ship.hull_integrity.first),
         max_hull: mgr.ship.hull_integrity.second,
         evasion_chance_percentage: mgr.dodge_factor(),
-        ship_name: mgr.ship.ship_name.to_str().into_owned(),
+        ship_name: mgr.my_blueprint.name.to_str().into_owned(),
         reactor: reactor_state(mgr.i_ship_id),
         faction: if mgr.i_ship_id == 0 {
             ShipId::Player
@@ -5191,7 +5245,14 @@ fn ship_manager_desc(
             .iter()
             .map(|x| {
                 let room = unsafe { xc(*x).unwrap() };
-                room_desc(room, mgr, &doors_short, &crew_short, &intruders_short)
+                room_desc(
+                    room,
+                    mgr,
+                    &doors_short,
+                    &crew_short,
+                    &intruders_short,
+                    &system_map,
+                )
             })
             .collect(),
         doors: mgr
@@ -5510,7 +5571,7 @@ fn sectors(s: &bindings::StarMap) -> Vec<context::SectorInfo> {
                 .into_iter()
                 .map(|(k, v)| (k.into(), unsafe { xc(v).unwrap() }.location.into()))
                 .collect(),
-            name: Some(x.description.name.to_str().into_owned()),
+            sector_name: Some(x.description.name.to_str().into_owned()),
             hostile: x.type_ == 1,
             civilian: x.type_ == 0,
             nebula: x.type_ == 2,
@@ -5557,8 +5618,11 @@ fn collect_context(app: &CApp) -> context::Context {
                                 .unlocked
                             };
                             let bp = unsafe { xb(x) }?;
+                            if bp.name.to_str() == "should not be seen" {
+                                return None;
+                            }
                             Some(context::ShipDesc {
-                                name: bp.desc.title.to_str().into_owned(),
+                                ship_name: bp.name.to_str().into_owned(), // bp.desc.title.to_str().into_owned(),
                                 class: bp.ship_class.to_str().into_owned(),
                                 description: bp.desc.description.to_str().into_owned(),
                                 layout_id: i,
@@ -5578,7 +5642,7 @@ fn collect_context(app: &CApp) -> context::Context {
                             [app.menu.ship_builder.current_type as usize];
                         let bp = unsafe { xb(bp).unwrap() };
                         context::ShipDesc {
-                            name: bp.desc.title.to_str().into_owned(),
+                            ship_name: bp.name.to_str().into_owned(),
                             class: bp.ship_class.to_str().into_owned(),
                             description: bp.desc.description.to_str().into_owned(),
                             layout_id: app.menu.ship_builder.current_ship_id as usize,
@@ -5589,19 +5653,6 @@ fn collect_context(app: &CApp) -> context::Context {
                     }),
                 player_ship: Some(context::ShipInfo {
                     ship_name: app.menu.ship_builder.current_name.to_str().into_owned(),
-                    destroyed: false,
-                    crew: IdMap::with(|map| {
-                        app.menu
-                            .ship_builder
-                            .v_crew_boxes
-                            .iter()
-                            .filter_map(|x| {
-                                let x = unsafe { xc(*x).unwrap() };
-                                let crew = x.base.base.item.crew()?;
-                                Some(crew_desc(crew, map))
-                            })
-                            .collect()
-                    }),
                     ..ship_manager_desc(s, None)
                 }),
                 enemy_ship: None,
@@ -5641,13 +5692,15 @@ fn collect_context(app: &CApp) -> context::Context {
     {
         confirmation_message = gui.crew_screen.delete_dialog.text.to_str().into_owned();
     }
-    let mut event_text = String::new();
+    let mut event_text = None;
     let mut event_options = vec![];
     if gui.choice_box.base.b_open {
         let c = &gui.choice_box;
-        event_text = "Current event:\n".to_owned()
-            + &c.main_text.to_str()
-            + &resource_event_str(&c.rewards, gui.ship_manager().unwrap());
+        event_text = Some(
+            "Current event:\n".to_owned()
+                + &c.main_text.to_str()
+                + &resource_event_str(&c.rewards, gui.ship_manager().unwrap()),
+        );
         event_options = c
             .choices
             .iter()
@@ -5789,8 +5842,8 @@ fn collect_context(app: &CApp) -> context::Context {
                 })
             })
             .flatten(),
-        player_ship: Some(ship_manager_desc(mgr, None)),
-        enemy_ship: Some(ship_manager_desc(mgr.current_target().unwrap(), None)),
+        player_ship: Some(ship_manager_desc(mgr, Some(&gui.equip_screen))),
+        enemy_ship: mgr.current_target().map(|x| ship_manager_desc(x, None)),
         inventory: Some(context::Inventory {
             drone_part_count: context::Help::new(text("tooltip_droneCount"), mgr.drone_count()),
             fuel_count: context::Help::new(text("tooltip_fuelCount"), mgr.fuel_count),
@@ -5909,7 +5962,9 @@ pub fn loop_hook2(app: &mut CApp) {
                                             log::error!("game->ws channel closed");
                                             return;
                                         };
-                                        log::info!("game2ws {msg:?}");
+                                        if let tungstenite::Message::Text(text) = &msg {
+                                            log::info!("game2ws {text}");
+                                        }
                                         if let Err(err) = ws.send(msg).await {
                                             log::error!("websocket send failed: {err}");
                                             break;
@@ -5919,7 +5974,6 @@ pub fn loop_hook2(app: &mut CApp) {
                                         let Some(msg) = msg else {
                                             break;
                                         };
-                                        log::info!("ws2game {msg:?}");
                                         let msg = match msg {
                                             Ok(msg) => msg,
                                             Err(err) => {
@@ -5927,6 +5981,9 @@ pub fn loop_hook2(app: &mut CApp) {
                                                 continue;
                                             }
                                         };
+                                        if let tungstenite::Message::Text(text) = &msg {
+                                            log::info!("ws2game {text}");
+                                        }
                                         ws2game_tx.send(Some(msg)).await.expect("ws->game channel closed");
                                     }
                                 }
