@@ -304,6 +304,12 @@ fn derive_delta2(input: TokenStream) -> TokenStream {
             .is_some()
         {
             2
+        } else if attrs
+            .iter()
+            .find(|x| x.path().to_token_stream().to_string().as_str() == "delta3")
+            .is_some()
+        {
+            3
         } else {
             0
         };
@@ -320,14 +326,58 @@ fn derive_delta2(input: TokenStream) -> TokenStream {
         if let Some(path) = path {
             path.segments.first_mut().unwrap().ident = Ident::new("serde", Span::call_site());
         }
-        body3.extend(quote! {
-            #ident: self.#ident.serializable(ctx),
-        });
-        fields2.extend(quote! {
-            #attr3
-            #vis #ident: <#ty as Serializable<'delta>>::Ser,
-        });
-        if attr1 == 1 {
+        let mut func = None;
+        if let Some(attr3) = attr3.as_ref() {
+            let mut ts = attr3
+                .meta
+                .require_list()
+                .unwrap()
+                .tokens
+                .to_token_stream()
+                .into_iter();
+            while let Some(x) = ts.next() {
+                if &x.to_string() == "skip_serializing_if" {
+                    ts.next();
+                    let proc_macro2::TokenTree::Literal(f) = ts.next().unwrap() else {
+                        panic!("not lit");
+                    };
+                    let f: syn::LitStr = syn::parse2(f.to_token_stream()).unwrap();
+                    func = Some(f.value());
+                } else if x.to_string().contains("skip_serializing_if") {
+                    panic!("{}", x.to_string());
+                }
+            }
+            if func.is_none() {
+                panic!("{}", attr3.to_token_stream().to_string());
+            }
+        }
+        if let Some(func) = func {
+            let path: syn::Path = syn::parse_str(&func).unwrap();
+            body3.extend(quote! {
+                #ident: if #path(&self.#ident) {
+                    None
+                } else {
+                    Some(self.#ident.serializable(ctx))
+                },
+            });
+            fields2.extend(quote! {
+                #attr
+                #[serde(skip_serializing_if = "Option::is_none")]
+                #vis #ident: Option<<#ty as Serializable<'delta>>::Ser>,
+            });
+        } else {
+            body3.extend(quote! {
+                #ident: self.#ident.serializable(ctx),
+            });
+            fields2.extend(quote! {
+                #attr
+                #attr3
+                #vis #ident: <#ty as Serializable<'delta>>::Ser,
+            });
+        }
+        if attr1 == 3 {
+            // do nothing
+        } else if attr1 == 1 {
             fields.extend(quote! {
                 #attr
                 #vis #ident: &'delta #ty,
@@ -421,7 +471,7 @@ fn derive_delta2(input: TokenStream) -> TokenStream {
     ret
 }
 
-#[proc_macro_derive(Delta, attributes(serde, delta, delta1, delta2))]
+#[proc_macro_derive(Delta, attributes(serde, delta, delta1, delta2, delta3))]
 pub fn derive_delta(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     derive_delta2(input.into()).into()
 }

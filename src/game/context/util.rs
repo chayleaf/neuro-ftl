@@ -348,11 +348,13 @@ impl<T: IsZero> IsZero for Help<T> {
 impl<'a, T: Delta<'a>> Delta<'a> for Help<T> {
     type Delta = Help2<'a, <T as Delta<'a>>::Delta>;
     fn delta(&'a self, prev: &'a Self, ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
-        let show = ctx.0.insert(&self.help);
-        self.value.delta(&prev.value, ctx).map(|x| Help2 {
-            ser_show: show,
-            value: x,
-            help: Cow::Borrowed(&self.help),
+        self.value.delta(&prev.value, ctx).map(|x| {
+            let show = ctx.0.insert(&self.help);
+            Help2 {
+                ser_show: show,
+                value: x,
+                help: Cow::Borrowed(&self.help),
+            }
         })
     }
 }

@@ -13,6 +13,15 @@ pub use util::Help;
 
 #[derive(Clone, Debug, Delta, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct Target {
+    #[delta1]
+    pub ship: ShipId,
+    #[delta1]
+    pub room_id: i32,
+}
+
+#[derive(Clone, Debug, Delta, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct WeaponInfo {
     #[serde(skip_serializing_if = "String::is_empty")]
     #[delta1]
@@ -69,11 +78,15 @@ pub struct WeaponInfo {
     #[serde(skip_serializing_if = "is_zero")]
     pub required_power: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub powered: Option<bool>,
+    pub activated: Option<bool>,
     #[serde(skip_serializing_if = "is_zero")]
     pub hacked: bool,
     #[serde(skip_serializing_if = "is_zero")]
     pub stale_info: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub targeted: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub autofiring: Option<bool>,
 }
 
 #[derive(Clone, Debug, Delta, Eq, PartialEq)]
@@ -98,8 +111,10 @@ pub struct DroneInfo {
     pub required_power: i32,
     #[serde(skip_serializing_if = "is_zero")]
     pub deploying: bool,
-    pub deployed: bool,
-    pub powered: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deployed: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activated: Option<bool>,
     #[serde(skip_serializing_if = "is_zero")]
     pub hacked: bool,
     #[serde(skip_serializing_if = "is_zero")]
@@ -312,6 +327,8 @@ pub struct RoomInfo {
     pub system_name: Option<String>,
     #[serde(skip_serializing_if = "is_zero")]
     pub fire_level: i32,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub breached: bool,
     pub oxygen_percentage: QuantizedI32<25>,
     #[serde(skip_serializing_if = "is_zero")]
     pub hacked: bool,
@@ -322,8 +339,6 @@ pub struct RoomInfo {
 #[derive(Clone, Debug, Delta, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DoorInfo {
-    #[delta2]
-    pub faction: ShipId,
     #[delta1]
     pub door_id: i32,
     pub room_id_1: i32,
@@ -697,6 +712,13 @@ pub struct Point<T> {
     pub y: T,
 }
 
+impl<'a, T: 'a + Ord + std::fmt::Debug> HasId<'a> for Point<T> {
+    type Id = &'a Self;
+    fn id(&'a self) -> Self::Id {
+        self
+    }
+}
+
 impl<'a, T: Delta<'a> + Serializable<'a>> Delta<'a> for Point<T> {
     type Delta = Point<T::Ser>;
     fn delta(&'a self, prev: &'a Self, ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
@@ -740,7 +762,7 @@ pub enum ShipId {
 pub struct LocationInfo {
     #[delta1]
     pub map_position: Point<i32>,
-    pub map_routes: BTreeMap<Direction, Point<i32>>,
+    pub map_routes: Vec<Point<i32>>,
     /// Your current location.
     #[serde(skip_serializing_if = "is_zero")]
     pub current: Help<bool>,

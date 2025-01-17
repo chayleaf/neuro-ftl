@@ -2,6 +2,7 @@ use std::{
     borrow::Cow,
     collections::{BTreeMap, BinaryHeap, HashMap, HashSet},
     ffi::c_int,
+    mem,
     ops::DerefMut,
     ptr,
     sync::OnceLock,
@@ -29,6 +30,8 @@ pub mod actions;
 mod context;
 pub mod strings;
 
+const TIP_TIMEOUT: Duration = Duration::from_secs(5);
+
 fn meta<T: Action>() -> neuro_sama::schema::Action {
     neuro_sama::schema::Action {
         schema: schemars::schema_for!(T),
@@ -43,6 +46,7 @@ struct State {
     app: *mut CApp,
     actions: ActionDb,
     buffer: Option<context::Context>,
+    tips: HashMap<Cow<'static, str>, Instant>,
 }
 
 unsafe impl Sync for State {}
@@ -748,17 +752,19 @@ impl neuro_sama::game::GameMut for State {
                 if valid {
                     if let Some(b) = app.gui().unwrap().choice_box.choices.get(index) {
                         if b.type_ == 1 {
-                            Err(Cow::from(format!("option {index} requirements not met, can't choose this! Please pick a different option.")).into())
+                            Err(Cow::from(format!("option {} requirements not met, can't choose this! Please pick a different option.", index + 1)).into())
                         } else {
+                            app.gui_mut().unwrap().choice_box.potential_choice = index as i32;
                             app.gui_mut().unwrap().choice_box.selected_choice = index as i32;
-                            unsafe {
+                            app.gui_mut().unwrap().choice_box.open_time = 0.5;
+                            /*unsafe {
                                 app.gui().unwrap().choice_box.base.vtable().close(
                                     ptr::addr_of_mut!(app.gui_mut().unwrap().choice_box.base),
                                 );
-                            }
+                            }*/
                             Ok(Cow::from(format!(
                                 "option {} chosen.{}",
-                                index,
+                                index + 1,
                                 resource_event_str(
                                     &app.gui()
                                         .unwrap()
@@ -3101,14 +3107,18 @@ impl neuro_sama::game::GameMut for State {
                         RememberType::CurrentEvent => {}
                         RememberType::Everything => {}
                     }
-                    Ok(Cow::from(format!(
+                    let ret = Some(Cow::from(format!(
                         "Context: {}",
                         serde_json::to_string(
                             &ret.serializable(&mut context::util::SerContext::default())
                         )
                         .unwrap()
-                    ))
-                    .into())
+                    )));
+                    if self.actions.force.is_some() {
+                        Err(ret)
+                    } else {
+                        Ok(ret)
+                    }
                 }
             }
             FtlActions::RememberShipInfo(event) => {
@@ -3215,14 +3225,19 @@ impl neuro_sama::game::GameMut for State {
                             actions::TargetShip::Player => ret.player_ship = Some(desc),
                             actions::TargetShip::Enemy => ret.enemy_ship = Some(desc),
                         }
-                        Ok(Cow::from(format!(
+                        let ret = Cow::from(format!(
                             "The ship info you've requested: {}",
                             serde_json::to_string(
                                 &ret.serializable(&mut context::util::SerContext::default())
                             )
                             .unwrap()
                         ))
-                        .into())
+                        .into();
+                        if self.actions.force.is_some() {
+                            Err(ret)
+                        } else {
+                            Ok(ret)
+                        }
                     } else {
                         Err(Cow::from("the ship you've requested doesn't exist").into())
                     }
@@ -3518,6 +3533,8 @@ fn available_actions(app: &CApp) -> ActionDb {
         // idk what this is, require human intervention
         return ret;
     }
+    ret.add::<actions::Remember>();
+    ret.add::<actions::RememberShipInfo>();
     if gui.leave_crew_dialog.base.b_open {
         if gui.leave_crew_dialog.yes_button.base.b_active {
             ret.add::<actions::Confirm>();
@@ -4265,16 +4282,30 @@ fn room_desc(
             .into(),
         hacked: room.i_hack_level > 1,
         stale_info: false,
+        breached: mgr
+            .ship
+            .v_outer_walls
+            .iter()
+            .filter_map(|x| unsafe { xc(*x) })
+            .any(|x| {
+                x.base.f_damage > 0.0 && {
+                    let mut pos = x.base.p_loc;
+                    pos.x += 17;
+                    pos.y += 17;
+                    (room.rect.x + 1..room.rect.x + room.rect.w).contains(&pos.x)
+                        && (room.rect.y + 1..room.rect.y + room.rect.h).contains(&pos.y)
+                }
+            }),
     }
 }
 
 fn door_desc(door: &bindings::Door) -> context::DoorInfo {
     context::DoorInfo {
-        faction: if door.base.i_ship_id == 0 {
+        /*faction: if door.base.i_ship_id == 0 {
             ShipId::Player
         } else {
             ShipId::Enemy
-        },
+        },*/
         door_id: door.i_door_id,
         room_id_1: door.i_room1,
         room_id_2: door.i_room2,
@@ -4745,8 +4776,8 @@ fn drone_desc<'a>(drone: &'a bindings::Drone, map: &mut IdMap<'a>) -> context::D
         faction,
         required_power: drone.required_power(),
         deploying: drone.powered && !drone.deployed,
-        deployed: drone.deployed,
-        powered: drone.powered,
+        deployed: Some(drone.deployed),
+        activated: Some(drone.powered),
         hacked: drone.i_hack_level > 1,
         dead: drone.b_dead,
         health,
@@ -4783,8 +4814,8 @@ fn drone_bp_desc<'a>(
         faction,
         required_power: drone.power,
         deploying: false,
-        deployed: false,
-        powered: false,
+        deployed: None,
+        activated: None,
         hacked: false,
         dead: false,
         health: max_health.map(|x| context::Pair {
@@ -4835,9 +4866,11 @@ fn weapon_bp_desc<'a>(
         projectile_speed: weapon.speed as i32,
         cooldown: weapon.cooldown as i32,
         required_power: weapon.power,
-        powered: None,
+        activated: None,
         hacked: false,
         stale_info: false,
+        targeted: None,
+        autofiring: None,
     }
 }
 
@@ -4883,9 +4916,11 @@ fn weapon_desc<'a>(
         projectile_speed: bp.speed as i32,
         cooldown: bp.cooldown as i32,
         required_power: weapon.required_power(),
-        powered: Some(weapon.powered),
+        activated: Some(weapon.powered),
         hacked: weapon.i_hack_level > 1,
         stale_info: false,
+        targeted: Some(!weapon.targets.is_empty()),
+        autofiring: Some(weapon.auto_firing),
     }
 }
 
@@ -5744,8 +5779,8 @@ fn locations(s: &bindings::StarMap, eq: &bindings::Equipment) -> Vec<context::Lo
             map_position: x.pos().into(),
             map_routes: x
                 .neighbors()
-                .into_iter()
-                .map(|(k, v)| (k.into(), unsafe { xc(v).unwrap() }.pos().into()))
+                .into_values()
+                .map(|v| unsafe { xc(v).unwrap() }.pos().into())
                 .collect(),
             current: Help::new(text("map_current_loc"), ptr::addr_of!(*x) == s.current_loc),
             boss: Help::new(
@@ -6120,12 +6155,18 @@ fn event_options(gui: &bindings::CommandGui) -> (Option<String>, Vec<String>) {
         .unwrap_or_default()
 }
 
-fn collect_context(app: &CApp, old_context: Option<&context::Context>) -> context::Context {
+fn collect_context(
+    app: &CApp,
+    old_context: Option<&context::Context>,
+) -> (Vec<Cow<'static, str>>, context::Context) {
+    let mut tips = Vec::new();
     if app.lang_chooser.base.b_open {
-        return Default::default();
+        tips.push("Please wait for human intervention".into());
+        return (tips, Default::default());
     }
     if !app.game_logic {
-        return Default::default();
+        tips.push("Please wait for the game to load".into());
+        return (tips, Default::default());
     }
     let sensors = app
         .gui()
@@ -6135,106 +6176,142 @@ fn collect_context(app: &CApp, old_context: Option<&context::Context>) -> contex
         .unwrap_or_default();
     if app.menu.b_open {
         if app.menu.b_credit_screen {
-            return context::Context {
-                in_credits: true,
-                ..Default::default()
-            };
+            tips.push(
+                "Credits are currently playing, you can skip them or wait for them to end".into(),
+            );
+            return (
+                tips,
+                context::Context {
+                    in_credits: true,
+                    ..Default::default()
+                },
+            );
         }
         if app.menu.ship_builder.b_open {
             let b = &app.menu.ship_builder;
             let s = b.ship_manager().unwrap();
-            return context::Context {
-                available_ships: app
-                    .menu
-                    .ship_builder
-                    .ships
-                    .into_iter()
-                    .enumerate()
-                    .flat_map(|(i, x)| {
-                        x.into_iter().enumerate().filter_map(move |(j, x)| {
-                            let unlocked = crate::keeper().unlocked(i, j);
-                            let bp = unsafe { xb(x) }?;
-                            if bp.name.to_str() == "should not be seen" {
-                                return None;
-                            }
-                            Some(context::ShipDesc {
-                                ship_name: bp.name.to_str().into_owned(), // bp.desc.title.to_str().into_owned(),
-                                class: bp.ship_class.to_str().into_owned(),
-                                description: bp.desc.description.to_str().into_owned(),
-                                layout_id: i,
-                                layout_variation_id: j,
-                                unlocked,
-                                unlock_condition: (!unlocked)
-                                    .then(|| bp.unlock.to_str().into_owned()),
+            tips.push("You are in ship selection. First, if you have any other unlocked ships, you may select a ship via `select_ship` action. After that, you may customize your ship using `rename_ship` and `rename_crew` actions. Finally, use the `start_game` action to start the game".into());
+            return (
+                tips,
+                context::Context {
+                    available_ships: app
+                        .menu
+                        .ship_builder
+                        .ships
+                        .into_iter()
+                        .enumerate()
+                        .flat_map(|(i, x)| {
+                            x.into_iter().enumerate().filter_map(move |(j, x)| {
+                                let unlocked = crate::keeper().unlocked(i, j);
+                                let bp = unsafe { xb(x) }?;
+                                if bp.name.to_str() == "should not be seen" {
+                                    return None;
+                                }
+                                Some(context::ShipDesc {
+                                    ship_name: bp.name.to_str().into_owned(), // bp.desc.title.to_str().into_owned(),
+                                    class: bp.ship_class.to_str().into_owned(),
+                                    description: bp.desc.description.to_str().into_owned(),
+                                    layout_id: i,
+                                    layout_variation_id: j,
+                                    unlocked,
+                                    unlock_condition: (!unlocked)
+                                        .then(|| bp.unlock.to_str().into_owned()),
+                                })
                             })
                         })
-                    })
-                    .collect(),
-                selected_ship: (app.menu.ship_builder.current_ship_id >= 0
-                    && app.menu.ship_builder.current_type >= 0)
-                    .then(|| {
-                        let bp = app.menu.ship_builder.ships
-                            [app.menu.ship_builder.current_ship_id as usize]
-                            [app.menu.ship_builder.current_type as usize];
-                        let bp = unsafe { xb(bp).unwrap() };
-                        context::ShipDesc {
-                            ship_name: bp.name.to_str().into_owned(),
-                            class: bp.ship_class.to_str().into_owned(),
-                            description: bp.desc.description.to_str().into_owned(),
-                            layout_id: app.menu.ship_builder.current_ship_id as usize,
-                            layout_variation_id: app.menu.ship_builder.current_type as usize,
-                            unlocked: false,
-                            unlock_condition: None,
+                        .collect(),
+                    selected_ship: (app.menu.ship_builder.current_ship_id >= 0
+                        && app.menu.ship_builder.current_type >= 0)
+                        .then(|| {
+                            let bp = app.menu.ship_builder.ships
+                                [app.menu.ship_builder.current_ship_id as usize]
+                                [app.menu.ship_builder.current_type as usize];
+                            let bp = unsafe { xb(bp).unwrap() };
+                            context::ShipDesc {
+                                ship_name: bp.name.to_str().into_owned(),
+                                class: bp.ship_class.to_str().into_owned(),
+                                description: bp.desc.description.to_str().into_owned(),
+                                layout_id: app.menu.ship_builder.current_ship_id as usize,
+                                layout_variation_id: app.menu.ship_builder.current_type as usize,
+                                unlocked: false,
+                                unlock_condition: None,
+                            }
+                        }),
+                    player_ship: Some(context::ShipInfo {
+                        ship_name: app.menu.ship_builder.current_name.to_str().into_owned(),
+                        ..{
+                            let mut desc = ship_manager_desc(s, None, sensors, old_context);
+                            desc.doors.clear();
+                            desc
                         }
                     }),
-                player_ship: Some(context::ShipInfo {
-                    ship_name: app.menu.ship_builder.current_name.to_str().into_owned(),
-                    ..{
-                        let mut desc = ship_manager_desc(s, None, sensors, old_context);
-                        desc.doors.clear();
-                        desc
-                    }
-                }),
-                enemy_ship: None,
-                ..Default::default()
-            };
+                    enemy_ship: None,
+                    ..Default::default()
+                },
+            );
         }
         if app.menu.b_select_save {
-            return context::Context {
+            tips.push("Your action is awaiting confirmation".into());
+            return (
+                tips,
+                context::Context {
+                    in_main_menu: true,
+                    can_continue_saved_game: app.menu.continue_button.base.b_active,
+                    confirmation_message: app.menu.confirm_new_game.text.to_str().into_owned(),
+                    ..Default::default()
+                },
+            );
+        }
+        if app.menu.continue_button.base.b_active {
+            tips.push("You are currently in the main menu. Actions you might want to use are `new_game` or `continue`".into());
+        } else {
+            tips.push("You are currently in the main menu. Please use the `new_game` action to start a new game".into());
+        }
+        return (
+            tips,
+            context::Context {
                 in_main_menu: true,
                 can_continue_saved_game: app.menu.continue_button.base.b_active,
-                confirmation_message: app.menu.confirm_new_game.text.to_str().into_owned(),
                 ..Default::default()
-            };
-        }
-        return context::Context {
-            in_main_menu: true,
-            can_continue_saved_game: app.menu.continue_button.base.b_active,
-            ..Default::default()
-        };
+            },
+        );
     }
     let gui = app.gui().unwrap();
     if gui.game_over_screen.base.b_open {
-        return context::Context {
-            game_over: gui.game_over_screen.gameover_text.to_str().into_owned(),
-            victory: Some(gui.game_over_screen.b_victory),
-            in_credits: gui.game_over_screen.b_showing_credits,
-            ..Default::default()
-        };
+        if gui.game_over_screen.b_victory {
+            tips.push("You win".into());
+        } else {
+            tips.push("You lost".into());
+        }
+        if gui.game_over_screen.b_showing_credits {
+            tips.push(
+                "Credits are currently playing, you can skip them or wait for them to end".into(),
+            );
+        }
+        return (
+            tips,
+            context::Context {
+                game_over: gui.game_over_screen.gameover_text.to_str().into_owned(),
+                victory: Some(gui.game_over_screen.b_victory),
+                in_credits: gui.game_over_screen.b_showing_credits,
+                ..Default::default()
+            },
+        );
     }
     let mut confirmation_message = String::new();
     if gui.leave_crew_dialog.base.b_open {
+        tips.push("Your action is awaiting confirmation".into());
         confirmation_message = gui.leave_crew_dialog.text.to_str().into_owned();
-    }
-    if gui.ship_screens.base.b_open
+    } else if gui.ship_screens.base.b_open
         && gui.crew_screen.base.b_open
         && gui.crew_screen.delete_dialog.base.b_open
     {
+        tips.push("Your action is awaiting confirmation".into());
         confirmation_message = gui.crew_screen.delete_dialog.text.to_str().into_owned();
     }
     let (event_text, event_options) = event_options(gui);
     let mgr = gui.ship_manager().unwrap();
-    context::Context {
+    let ret = context::Context {
         confirmation_message,
         available_ships: vec![],
         can_continue_saved_game: false,
@@ -6273,7 +6350,7 @@ fn collect_context(app: &CApp, old_context: Option<&context::Context>) -> contex
             sensors,
             old_context,
         )),
-        enemy_ship: mgr.current_target().map(|x| {
+        enemy_ship: mgr.current_target().filter(|x| x.hostile_ship).map(|x| {
             let mut desc = ship_manager_desc(x, None, sensors, old_context);
             // doors for the enemy ship are kinda useless
             desc.doors.clear();
@@ -6283,7 +6360,139 @@ fn collect_context(app: &CApp, old_context: Option<&context::Context>) -> contex
             desc
         }),
         inventory: Some(inventory(gui)),
+    };
+    let ship = ret.player_ship.as_ref().unwrap();
+    if gui.star_map().is_some_and(|x| x.base.b_open) {
+        let s = gui.star_map().unwrap();
+        if s.b_choosing_new_sector {
+            tips.push("You are currently in sector selection. Friendly sectors have more stores, while hostile sectors have more enemies. Nebula sectors have lots of nebulae, and abandoned sectors are just plain dangerous. Use the `choose_next_sector` action".into());
+        } else if mgr.fuel_count == 0 {
+            tips.push("You don't currently have any fuel. Use the `skip_turn` action to skip your jump turn".into());
+        } else if s.boss_level {
+            tips.push("You are currently fighting the endgame boss. It jumps every 2 turns, and if it remains at the federation base for 3 consecutive turns, you automatically lose. The boss has 3 stages, it will jump away after each stage, but return to the federation base shortly after. Good luck! Use the `jump` action to progress, note the repair stations scattered around".into());
+            if s.arrived_at_base > 0 {
+                tips.push(
+                    format!(
+                        "WARNING: The boss will destroy the federation base in {} turns",
+                        4 - s.arrived_at_base
+                    )
+                    .into(),
+                );
+            }
+        } else if s.current_loc().is_some_and(|x| x.beacon) {
+            tips.push("You've successfully reached the exit beacon. You may proceed to the next sector by using the `open_next_sector_selection` action".into());
+        } else {
+            tips.push("You are currently in star selection. Generally, your goal is to pick a route to the exit beacon (marked with the \"exit\" flag) that's as long as possible, but still avoid encounters with the rebels' fleet".into());
+        }
+    } else if !gui.choice_box.base.b_open {
+        let mut bad = false;
+        if ship.rooms.iter().any(|x| x.fire_level > 0) {
+            tips.push("Some of your rooms are on fire! You may send crew members to fight fire, or you may vent oxygen by opening airlocks using the `plan_door_route` and `open_doors` actions".into());
+            bad = true;
+        }
+        if mgr
+            .oxygen_system()
+            .map(|x| x.f_total_oxygen)
+            .unwrap_or_default()
+            < 0.7
+        {
+            tips.push(
+                "Your ship is low on oxygen, potential sources are hull breaches and open doors. You can use the `close_doors` action for the latter".into(),
+            );
+        }
+
+        if ship.rooms.iter().any(|x| x.breached) {
+            tips.push(
+                "Some of your rooms are breached and will leak oxygen! You may move your crew there with the `move_crew` action to repair the breaches".into(),
+            );
+            bad = true;
+        }
+        if ship
+            .crew
+            .iter()
+            .any(|x| x.health.current.0 < x.health.max.0)
+            && mgr.medbay_system().is_some()
+        {
+            tips.push(
+                "Some of your crew members are damaged, you may use the `move_crew` action to move them to the medbay room for healing".into(),
+            );
+            bad = true;
+        }
+        if mgr.i_intruder_count > 0 {
+            tips.push("There are intruders on your ship! You may move your crew to fight them with the `move_crew` action".into());
+            bad = true;
+        }
+        if let Some(space) = unsafe { xc(gui.space_status.space) } {
+            if space.asteroid_generator.b_running {
+                tips.push("You are in an asteroid field, all ships will be constantly bombarded with asteroids until you leave the system with the `star_map` action".into());
+            }
+            if space.sun_level && space.flash_timer.curr_goal - space.flash_timer.curr_time < 10.0 {
+                tips.push("A solar flare is about to occur and possibly start a fire".into());
+            }
+            if space.pulsar_level
+                && space.flash_timer.curr_goal - space.flash_timer.curr_time < 10.0
+            {
+                tips.push(
+                    "An ion pulse is about to occur and possibly disable some systems".into(),
+                );
+            }
+            if space.b_pds
+                && space.flash_timer.curr_goal - space.flash_timer.curr_time < 10.0
+                && space.env_target != 1
+            {
+                tips.push("The anti-ship batteries have locked onto your ship".into());
+            }
+        }
+        tips.push("Use `increase_system_power` and `decrease_system_power` actions to distribute power across the ship".into());
+        if ret.enemy_ship.is_some() {
+            tips.push("You are currently engaged in combat! You can use the `pause` action at any time to give yourself more time to think".into());
+            if !bad {
+                tips.push("You should make the crew members man ship systems by moving them to system rooms with the `move_crew` actions. Manning bonuses depend on the system".into());
+            }
+            if let Some(inc) = unsafe { xc(gui.space_status.incoming_fire) } {
+                if inc.tracker.running {
+                    tips.push("The boss ship is about to deploy drones".into());
+                }
+            }
+            if !ship.weapons.iter().any(|x| {
+                x.contents
+                    .as_ref()
+                    .is_some_and(|x| x.activated.unwrap_or_default())
+            }) {
+                tips.push("You don't have any activated weapons at the moment! Use the `activate_weapon` action".into());
+            }
+            if ship.weapons.iter().any(|x| {
+                x.contents.as_ref().is_some_and(|x| {
+                    x.activated.unwrap_or_default() && !x.targeted.unwrap_or_default()
+                })
+            }) {
+                tips.push("Some of your weapons are powered, but don't have any targets. Fix that with the `set_weapon_targets` action".into());
+            }
+            if ship.drones.iter().any(|x| {
+                x.contents
+                    .as_ref()
+                    .is_some_and(|x| !x.activated.unwrap_or_default())
+            }) {
+                tips.push(
+                    "Some of your drones aren't activated! You may use the `activate_drone` action, but it will use a drone part"
+                        .into(),
+                );
+            }
+        }
+        if !mgr.system(System::Pilot).is_some_and(|x| x.functioning()) {
+            tips.push(
+                "You don't have anyone manning piloting! The FTL drive won't charge, the ship won't evade projectiles"
+                    .into(),
+            );
+        }
+        if !mgr.system(System::Oxygen).is_some_and(|x| x.functioning()) {
+            tips.push("The oxygen generator is disabled! Oxygen will eventually deplete".into());
+        }
+        if gui.ftl_button.base.base.b_active {
+            tips.push("Use the `star_map` action to move on from the current location".into());
+        }
     }
+    (tips, ret)
 }
 
 // useful to hook: WarningMessage::Start or smth
@@ -6302,6 +6511,7 @@ pub fn loop_hook2(app: &mut CApp) {
                 app: ptr::null_mut(),
                 actions: ActionDb::default(),
                 buffer: None,
+                tips: HashMap::new(),
             };
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -6412,22 +6622,54 @@ pub fn loop_hook2(app: &mut CApp) {
             log::error!("error starting up: {err}");
         }
     }
-    let ctx = collect_context(app, game.buffer.as_ref());
+    let (tips, ctx) = collect_context(app, game.buffer.as_ref());
+
+    fn format_tips(
+        mut tips: Vec<Cow<'static, str>>,
+        old_tips: &mut HashMap<Cow<'static, str>, Instant>,
+    ) -> String {
+        let now = Instant::now();
+        tips.retain(|tip| {
+            if let Some(old) = old_tips.get(tip.as_ref()) {
+                if now - *old < TIP_TIMEOUT {
+                    return false;
+                }
+            }
+            old_tips.insert(tip.clone(), now);
+            true
+        });
+        if tips.is_empty() {
+            String::new()
+        } else {
+            format!("Tips: {}\n\n", tips.join("; "))
+        }
+    }
+    let mut old_tips = HashMap::new();
+    mem::swap(&mut old_tips, &mut game.tips);
     if let Some(buf) = game.buffer.take() {
         if let Some(delta) = ctx.delta(&buf, &mut context::util::DeltaContext::default()) {
-            if let Err(err) = game.context(format!("Game state changes (not the entire state). If you forgot something, use the `remind` action.\n\n{}", serde_json::to_string(&delta).unwrap()), false) {
+            if let Err(err) = game.context(
+                format!(
+                    "{}Game state changes (not the entire state). If you forgot something, use the `remind`/`remind_ship` actions: {}",
+                    format_tips(tips, &mut old_tips),
+                    serde_json::to_string(&delta).unwrap(),
+                ),
+                false,
+            ) {
                 log::error!("error sending context delta: {err}");
             }
         }
     } else if let Err(err) = game.context(
         format!(
-            "This is the current game state in JSON format. After this, you won't receive full state snapshots anymore, only the changed parts. If you forgot something, use the `remind` action to resend context about something.\n\n{}",
+            "{}This is the current game state in JSON format. After this, you won't receive full state snapshots anymore, only the changed parts. If you forgot something, use the `remind` or `remind_ship` action to resend context about something: {}",
+            format_tips(tips, &mut old_tips),
             serde_json::to_string(&ctx.serializable(&mut context::util::SerContext::default())).unwrap(),
         ),
         false
     ) {
         log::error!("error sending initial context: {err}");
     }
+    mem::swap(&mut old_tips, &mut game.tips);
     game.buffer = Some(ctx);
     if let Some(mut force) = game.actions.force.clone() {
         if matches!(force.send_at, Some(x) if x < Instant::now()) {

@@ -3925,15 +3925,14 @@ impl StarMap {
                 .rev()
                 .enumerate()
                 .find(|(_, x)| **x == loc)
-                .map(|x| x.0)
         } else {
             self.boss_path
                 .iter()
                 .skip(self.boss_loc as usize)
                 .enumerate()
                 .find(|(_, x)| **x == loc)
-                .map(|x| x.0)
         }
+        .map(|x| (x.0 * 2).saturating_sub(self.boss_jumping.into()))
     }
 }
 

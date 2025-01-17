@@ -10,7 +10,8 @@ pub const LOC_BASE: &str =
 pub const LOC_EXIT: &str = "This is the exit beacon. Here you can travel to the next sector.";
 pub const LOC_REBELS: &str = "The Rebels are about to gain control of this location!";
 pub const LOC_STORE: &str = "There is a store at this location.";
-pub const LOC_BOSS1: &str = "Rebel Flagship will be here in this many turns.";
+pub const LOC_BOSS1: &str =
+    "Rebel Flagship will be here in this many jumps. It makes a jump for every 2 jumps you make.";
 pub const LOC_FLEET1: &str = "The Rebels will have control of this location in this many turns.";
 
 pub const LOC_NEBULA_FLEET: &str = "You're inside a nebula. Your sensors will not function.";
