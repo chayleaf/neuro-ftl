@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use neuro_ftl_derive::JsonSchemaNoRef;
 use neuro_sama::derive::Actions;
 use schemars::JsonSchema;
@@ -439,19 +437,19 @@ pub struct RememberShipInfo {
     #[serde(default)]
     pub include_reactor_info: bool,
     #[serde(default)]
-    pub room_ids: Option<HashSet<u32>>,
+    pub room_ids: Option<Vec<u32>>,
     #[serde(default)]
-    pub door_ids: Option<HashSet<i32>>,
+    pub door_ids: Option<Vec<i32>>,
     #[serde(default)]
-    pub system_names: Option<HashSet<String>>,
+    pub system_names: Option<Vec<String>>,
     #[serde(default)]
-    pub crew_member_names: Option<HashSet<String>>,
+    pub crew_member_names: Option<Vec<String>>,
     #[serde(default)]
-    pub weapon_names: Option<HashSet<String>>,
+    pub weapon_names: Option<Vec<String>>,
     #[serde(default)]
-    pub drone_names: Option<HashSet<String>>,
+    pub drone_names: Option<Vec<String>>,
     #[serde(default)]
-    pub augment_names: Option<HashSet<String>>,
+    pub augment_names: Option<Vec<String>>,
 }
 
 #[allow(clippy::large_enum_variant)]

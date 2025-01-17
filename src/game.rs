@@ -3159,6 +3159,7 @@ impl neuro_sama::game::GameMut for State {
                         }
                         if let Some(room_ids) = room_ids {
                             if !room_ids.is_empty() {
+                                let room_ids = room_ids.into_iter().collect::<HashSet<_>>();
                                 desc.rooms.retain(|x| room_ids.contains(&x.room_id));
                             }
                         } else {
@@ -3166,6 +3167,7 @@ impl neuro_sama::game::GameMut for State {
                         }
                         if let Some(door_ids) = door_ids {
                             if !door_ids.is_empty() {
+                                let door_ids = door_ids.into_iter().collect::<HashSet<_>>();
                                 desc.doors.retain(|x| door_ids.contains(&x.door_id));
                             }
                         } else {
@@ -3173,6 +3175,7 @@ impl neuro_sama::game::GameMut for State {
                         }
                         if let Some(system_names) = system_names {
                             if !system_names.is_empty() {
+                                let system_names = system_names.into_iter().collect::<HashSet<_>>();
                                 desc.systems
                                     .retain(|x| system_names.contains(x.system_name.as_ref()));
                             }
@@ -3181,6 +3184,8 @@ impl neuro_sama::game::GameMut for State {
                         }
                         if let Some(crew_member_names) = crew_member_names {
                             if !crew_member_names.is_empty() {
+                                let crew_member_names =
+                                    crew_member_names.into_iter().collect::<HashSet<_>>();
                                 desc.crew
                                     .retain(|x| crew_member_names.contains(&x.crew_member_name));
                             }
@@ -3189,6 +3194,7 @@ impl neuro_sama::game::GameMut for State {
                         }
                         if let Some(weapon_names) = weapon_names {
                             if !weapon_names.is_empty() {
+                                let weapon_names = weapon_names.into_iter().collect::<HashSet<_>>();
                                 desc.weapons.retain(|x| {
                                     x.contents
                                         .as_ref()
@@ -3200,6 +3206,7 @@ impl neuro_sama::game::GameMut for State {
                         }
                         if let Some(drone_names) = drone_names {
                             if !drone_names.is_empty() {
+                                let drone_names = drone_names.into_iter().collect::<HashSet<_>>();
                                 desc.drones.retain(|x| {
                                     x.contents
                                         .as_ref()
@@ -3211,6 +3218,8 @@ impl neuro_sama::game::GameMut for State {
                         }
                         if let Some(augment_names) = augment_names {
                             if !augment_names.is_empty() {
+                                let augment_names =
+                                    augment_names.into_iter().collect::<HashSet<_>>();
                                 desc.augments.retain(|x| {
                                     x.contents
                                         .as_ref()
