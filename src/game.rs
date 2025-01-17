@@ -10,7 +10,7 @@ use std::{
 
 use actions::{FtlActions, InventorySlotType, RememberType, TargetShip};
 use context::{
-    util::{Delta, Help},
+    util::{Delta, Help, Serializable},
     ShipId, SystemLevel,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -3101,10 +3101,14 @@ impl neuro_sama::game::GameMut for State {
                         RememberType::CurrentEvent => {}
                         RememberType::Everything => {}
                     }
-                    Ok(
-                        Cow::from(format!("Context: {}", serde_json::to_string(&ret).unwrap()))
-                            .into(),
-                    )
+                    Ok(Cow::from(format!(
+                        "Context: {}",
+                        serde_json::to_string(
+                            &ret.serializable(&mut context::util::SerContext::default())
+                        )
+                        .unwrap()
+                    ))
+                    .into())
                 }
             }
             FtlActions::RememberShipInfo(event) => {
@@ -3213,7 +3217,10 @@ impl neuro_sama::game::GameMut for State {
                         }
                         Ok(Cow::from(format!(
                             "The ship info you've requested: {}",
-                            serde_json::to_string(&ret).unwrap()
+                            serde_json::to_string(
+                                &ret.serializable(&mut context::util::SerContext::default())
+                            )
+                            .unwrap()
                         ))
                         .into())
                     } else {
@@ -6405,18 +6412,21 @@ pub fn loop_hook2(app: &mut CApp) {
             log::error!("error starting up: {err}");
         }
     }
-    let mut ctx = collect_context(app, game.buffer.as_ref());
+    let ctx = collect_context(app, game.buffer.as_ref());
     if let Some(buf) = game.buffer.take() {
         if let Some(delta) = ctx.delta(&buf, &mut context::util::DeltaContext::default()) {
             if let Err(err) = game.context(format!("Game state changes (not the entire state). If you forgot something, use the `remind` action.\n\n{}", serde_json::to_string(&delta).unwrap()), false) {
                 log::error!("error sending context delta: {err}");
             }
         }
-    } else {
-        ctx.visit(&mut context::util::SerContext::default());
-        if let Err(err) = game.context(format!("This is the current game state in JSON format. After this, you won't receive full state snapshots anymore, only the changed parts. If you forgot something, use the `remind` action to resend context about something.\n\n{}", serde_json::to_string(&ctx).unwrap()), false) {
-            log::error!("error sending initial context: {err}");
-        }
+    } else if let Err(err) = game.context(
+        format!(
+            "This is the current game state in JSON format. After this, you won't receive full state snapshots anymore, only the changed parts. If you forgot something, use the `remind` action to resend context about something.\n\n{}",
+            serde_json::to_string(&ctx.serializable(&mut context::util::SerContext::default())).unwrap(),
+        ),
+        false
+    ) {
+        log::error!("error sending initial context: {err}");
     }
     game.buffer = Some(ctx);
     if let Some(mut force) = game.actions.force.clone() {

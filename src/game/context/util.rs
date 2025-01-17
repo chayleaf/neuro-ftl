@@ -7,15 +7,15 @@ use std::{
 
 #[derive(Debug, Default)]
 pub struct DeltaContext<'a>(HashSet<&'a str>);
-#[derive(Debug, Default)]
-pub struct SerContext<'a>(HashSet<&'a str>);
+pub type SerContext<'a> = DeltaContext<'a>;
 
 pub trait Delta<'a> {
-    type Delta: std::fmt::Debug + Serialize;
+    type Delta: Serialize;
     fn delta(&'a self, prev: &'a Self, ctx: &mut DeltaContext<'a>) -> Option<Self::Delta>;
-    fn visit(&'a mut self, ctx: &mut SerContext<'a>) {
-        let _ = ctx;
-    }
+}
+pub trait Serializable<'a> {
+    type Ser: Serialize;
+    fn serializable(&'a self, ctx: &mut SerContext<'a>) -> Self::Ser;
 }
 
 #[macro_export]
@@ -25,6 +25,12 @@ macro_rules! impl_delta {
             type Delta = &'a Self;
             fn delta(&'a self, prev: &'a Self, _ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
                 (self != prev).then_some(self)
+            }
+        }
+        impl<'a> Serializable<'a> for $t {
+            type Ser = &'a Self;
+            fn serializable(&'a self, _ctx: &mut SerContext<'a>) -> Self::Ser {
+                self
             }
         })*
     };
@@ -37,6 +43,13 @@ impl<'a, 'b: 'a> Delta<'a> for &'b str {
     }
 }
 
+impl<'a, 'b: 'a> Serializable<'a> for &'b str {
+    type Ser = &'a str;
+    fn serializable(&'a self, _ctx: &mut SerContext<'a>) -> Self::Ser {
+        self
+    }
+}
+
 impl<'a> Delta<'a> for f64 {
     type Delta = &'a Self;
     fn delta(&'a self, prev: &'a Self, _ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
@@ -44,10 +57,24 @@ impl<'a> Delta<'a> for f64 {
     }
 }
 
+impl<'a> Serializable<'a> for f64 {
+    type Ser = &'a Self;
+    fn serializable(&'a self, _ctx: &mut SerContext<'a>) -> Self::Ser {
+        self
+    }
+}
+
 impl<'a> Delta<'a> for f32 {
     type Delta = &'a Self;
     fn delta(&'a self, prev: &'a Self, _ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
         (self.to_bits() != prev.to_bits()).then_some(self)
+    }
+}
+
+impl<'a> Serializable<'a> for f32 {
+    type Ser = &'a Self;
+    fn serializable(&'a self, _ctx: &mut SerContext<'a>) -> Self::Ser {
+        self
     }
 }
 
@@ -94,20 +121,21 @@ impl<T: Serialize, Y: Serialize> Serialize for Opt3<T, Y> {
     }
 }
 
-impl<'a, T: 'a + std::fmt::Debug + Serialize + Eq + Delta<'a>> Delta<'a> for Option<T> {
-    type Delta = Opt3<&'a T, T::Delta>;
+impl<'a, T: 'a + Serializable<'a> + Delta<'a>> Delta<'a> for Option<T> {
+    type Delta = Opt3<T::Ser, T::Delta>;
     fn delta(&'a self, prev: &'a Self, ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
         match (prev, self) {
             (None, None) => None,
             (Some(old), Some(new)) => new.delta(old, ctx).map(Opt3::Y),
-            (None, Some(x)) => Some(Opt3::T(x)),
+            (None, Some(x)) => Some(Opt3::T(x.serializable(ctx))),
             (Some(_), None) => Some(Opt3::None),
         }
     }
-    fn visit(&'a mut self, ctx: &mut SerContext<'a>) {
-        if let Some(val) = self.as_mut() {
-            val.visit(ctx);
-        }
+}
+impl<'a, T: 'a + Serializable<'a>> Serializable<'a> for Option<T> {
+    type Ser = Option<T::Ser>;
+    fn serializable(&'a self, ctx: &mut SerContext<'a>) -> Self::Ser {
+        self.as_ref().map(|x| x.serializable(ctx))
     }
 }
 
@@ -119,14 +147,16 @@ pub enum Operations<A, B> {
     Changed(B),
 }
 
-impl<'a, T: 'a + Clone + std::fmt::Debug + Delta<'a> + HasId<'a> + Serialize> Delta<'a> for Vec<T> {
-    type Delta = Opt3<Vec<Operations<T, T::Delta>>, &'a [T]>;
+impl<'a, T: 'a + Clone + std::fmt::Debug + Delta<'a> + HasId<'a> + Serializable<'a>> Delta<'a>
+    for Vec<T>
+{
+    type Delta = Opt3<Vec<Operations<T::Ser, T::Delta>>, Vec<T::Ser>>;
     fn delta(&'a self, prev: &'a Self, ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
         if self.is_empty() && !prev.is_empty() {
             return Some(Opt3::None);
         }
         if !self.is_empty() && prev.is_empty() {
-            return Some(Opt3::Y(self));
+            return Some(Opt3::Y(self.iter().map(|x| x.serializable(ctx)).collect()));
         }
         let mut ret = vec![];
         let mut this: Vec<_> = self.iter().collect();
@@ -140,7 +170,10 @@ impl<'a, T: 'a + Clone + std::fmt::Debug + Delta<'a> + HasId<'a> + Serialize> De
                     "duplicate id {:?} {:?}\n{}",
                     x[0].id(),
                     x[1].id(),
-                    serde_json::to_string(&this).unwrap()
+                    serde_json::to_string(
+                        &self.iter().map(|x| x.serializable(ctx)).collect::<Vec<_>>()
+                    )
+                    .unwrap()
                 );
                 #[cfg(not(debug_assertions))]
                 log::error!("duplicate id {:?} {:?}", x[0].id(), x[1].id());
@@ -152,15 +185,17 @@ impl<'a, T: 'a + Clone + std::fmt::Debug + Delta<'a> + HasId<'a> + Serialize> De
             match (this.peek(), that.peek()) {
                 (None, None) => break,
                 (None, Some(_)) => {
-                    ret.push(Operations::Removed(that.next().unwrap().clone()));
+                    ret.push(Operations::Removed(that.next().unwrap().serializable(ctx)));
                 }
                 (Some(_), None) => {
-                    ret.push(Operations::Added(this.next().unwrap().clone()));
+                    ret.push(Operations::Added(this.next().unwrap().serializable(ctx)));
                 }
                 (Some(x), Some(y)) => match x.id().cmp(&y.id()) {
-                    Ordering::Less => ret.push(Operations::Added(this.next().unwrap().clone())),
+                    Ordering::Less => {
+                        ret.push(Operations::Added(this.next().unwrap().serializable(ctx)))
+                    }
                     Ordering::Greater => {
-                        ret.push(Operations::Removed(that.next().unwrap().clone()))
+                        ret.push(Operations::Removed(that.next().unwrap().serializable(ctx)))
                     }
                     Ordering::Equal => {
                         if let Some(delta) = this.next().unwrap().delta(that.next().unwrap(), ctx) {
@@ -172,42 +207,56 @@ impl<'a, T: 'a + Clone + std::fmt::Debug + Delta<'a> + HasId<'a> + Serialize> De
         }
         (!ret.is_empty()).then_some(Opt3::T(ret))
     }
-    fn visit(&'a mut self, ctx: &mut SerContext<'a>) {
-        for val in self {
-            val.visit(ctx);
-        }
+}
+impl<'a, T: Serializable<'a>> Serializable<'a> for Vec<T> {
+    type Ser = Vec<T::Ser>;
+    fn serializable(&'a self, ctx: &mut SerContext<'a>) -> Self::Ser {
+        self.iter().map(|x| x.serializable(ctx)).collect()
     }
 }
 
 impl<
         'a,
         K: 'a + Clone + std::fmt::Debug + Serialize + Ord,
-        T: 'a + Clone + std::fmt::Debug + Delta<'a> + Serialize + PartialEq,
+        T: 'a + Clone + std::fmt::Debug + Delta<'a> + Serializable<'a> + PartialEq,
     > Delta<'a> for BTreeMap<K, T>
 {
-    type Delta = Option<&'a BTreeMap<K, T>>;
-    fn delta(&'a self, prev: &'a Self, _ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
+    type Delta = Option<BTreeMap<&'a K, T::Ser>>;
+    fn delta(&'a self, prev: &'a Self, ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
         if self == prev {
             None
         } else {
-            Some(if self.is_empty() { None } else { Some(self) })
-        }
-    }
-    fn visit(&'a mut self, ctx: &mut SerContext<'a>) {
-        for val in self.values_mut() {
-            val.visit(ctx);
+            Some(if self.is_empty() {
+                None
+            } else {
+                Some(self.iter().map(|(k, v)| (k, v.serializable(ctx))).collect())
+            })
         }
     }
 }
-
-impl<'a, 'b: 'a, T: 'a + ToOwned + std::fmt::Debug + Serialize + Eq + ?Sized> Delta<'a>
-    for Cow<'b, T>
-where
-    <Cow<'a, T> as ToOwned>::Owned: std::fmt::Debug,
+impl<
+        'a,
+        K: 'a + Clone + std::fmt::Debug + Serialize + Ord,
+        T: 'a + Clone + std::fmt::Debug + Delta<'a> + Serializable<'a> + PartialEq,
+    > Serializable<'a> for BTreeMap<K, T>
 {
+    type Ser = BTreeMap<&'a K, T::Ser>;
+    fn serializable(&'a self, ctx: &mut SerContext<'a>) -> Self::Ser {
+        self.iter().map(|(k, v)| (k, v.serializable(ctx))).collect()
+    }
+}
+
+impl<'a, 'b: 'a, T: 'a + ToOwned + Serialize + PartialEq + ?Sized> Delta<'a> for Cow<'b, T> {
     type Delta = Cow<'a, T>;
     fn delta(&'a self, prev: &'a Self, _ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
         (self != prev).then(|| Cow::Borrowed(self.as_ref()))
+    }
+}
+
+impl<'a, 'b: 'a, T: 'a + ToOwned + Serialize + ?Sized> Serializable<'a> for Cow<'b, T> {
+    type Ser = Cow<'a, T>;
+    fn serializable(&'a self, _ctx: &mut SerContext<'a>) -> Self::Ser {
+        Cow::Borrowed(self.as_ref())
     }
 }
 
@@ -233,11 +282,33 @@ impl<'a> HasId<'a> for String {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Ord, PartialOrd, Hash)]
+#[derive(Clone, Debug)]
 pub struct Help2<'a, T> {
-    pub value: T,
     pub help: Cow<'a, str>,
+    pub value: T,
     pub ser_show: bool,
+}
+
+impl<'a, T: Serialize> Serialize for Help2<'a, T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        #[derive(Serialize)]
+        pub struct Help3<'a, T> {
+            pub help: &'a str,
+            pub value: T,
+        }
+        if self.ser_show {
+            Help3 {
+                help: &self.help,
+                value: &self.value,
+            }
+            .serialize(serializer)
+        } else {
+            self.value.serialize(serializer)
+        }
+    }
 }
 
 impl<'a, T: PartialEq> PartialEq for Help2<'a, T> {
@@ -248,43 +319,53 @@ impl<'a, T: PartialEq> PartialEq for Help2<'a, T> {
 
 impl<'a, T: Eq> Eq for Help2<'a, T> {}
 
-#[derive(Clone, Debug, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[serde(transparent)]
-#[repr(transparent)]
-pub struct Help<T>(Help2<'static, T>);
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Help<T> {
+    pub help: Cow<'static, str>,
+    pub value: T,
+}
 
 impl<T> Help<T> {
     pub fn new(help: impl Into<Cow<'static, str>>, value: T) -> Self {
-        Self(Help2 {
+        Self {
             value,
             help: help.into(),
-            ser_show: true,
-        })
+        }
     }
 }
 
-impl<T: From<bool> + PartialEq> Help<T> {
-    pub fn is_zero(&self) -> bool {
-        self.0.value == T::from(false)
+impl<'a, T: IsZero> IsZero for Help2<'a, T> {
+    fn is_zero(&self) -> bool {
+        self.value.is_zero()
+    }
+}
+impl<T: IsZero> IsZero for Help<T> {
+    fn is_zero(&self) -> bool {
+        self.value.is_zero()
     }
 }
 
-impl<'a, T: Serialize> Delta<'a> for Help<T>
-where
-    T: Delta<'a>,
-{
+impl<'a, T: Delta<'a>> Delta<'a> for Help<T> {
     type Delta = Help2<'a, <T as Delta<'a>>::Delta>;
     fn delta(&'a self, prev: &'a Self, ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
-        let show = ctx.0.insert(&self.0.help);
-        self.0.value.delta(&prev.0.value, ctx).map(|x| Help2 {
+        let show = ctx.0.insert(&self.help);
+        self.value.delta(&prev.value, ctx).map(|x| Help2 {
             ser_show: show,
             value: x,
-            help: Cow::Borrowed(&self.0.help),
+            help: Cow::Borrowed(&self.help),
         })
     }
-    fn visit(&'a mut self, ctx: &mut SerContext<'a>) {
-        self.0.ser_show = ctx.0.insert(&self.0.help);
-        self.0.value.visit(ctx);
+}
+
+impl<'a, T: Serializable<'a>> Serializable<'a> for Help<T> {
+    type Ser = Help2<'a, <T as Serializable<'a>>::Ser>;
+    fn serializable(&'a self, ctx: &mut SerContext<'a>) -> Self::Ser {
+        let show = ctx.0.insert(&self.help);
+        Help2 {
+            ser_show: show,
+            value: self.value.serializable(ctx),
+            help: Cow::Borrowed(&self.help),
+        }
     }
 }
 
@@ -326,6 +407,12 @@ macro_rules! impl_quantized {
                 ((self.0 / X) != (prev.0 / X)).then_some(self.0)
             }
         }
+        impl<'a, const X: $ty> Serializable<'a> for $name<X> {
+            type Ser = &'a Self;
+            fn serializable(&'a self, _ctx: &mut SerContext<'a>) -> Self::Ser {
+                self
+            }
+        }
 
         impl<const X: $ty> From<$ty> for $name<X> {
             fn from(x: $ty) -> Self {
@@ -347,8 +434,42 @@ impl_quantized!(
     (QuantizedI64, i64),
 );
 
-pub fn is_zero<T: From<bool> + PartialEq>(x: &T) -> bool {
-    *x == T::from(false)
+pub trait IsZero {
+    fn is_zero(&self) -> bool;
+}
+macro_rules! impl_is0 {
+    ($($ty:tt),+) => {
+        $(impl IsZero for $ty {
+            fn is_zero(&self) -> bool {
+                *self == 0
+            }
+        })+
+    };
+}
+impl_is0!(u8, i8, u16, i16, u32, i32, u64, i64, usize, isize, u128, i128);
+impl IsZero for bool {
+    fn is_zero(&self) -> bool {
+        !*self
+    }
+}
+impl IsZero for f64 {
+    fn is_zero(&self) -> bool {
+        *self == 0.0
+    }
+}
+impl IsZero for f32 {
+    fn is_zero(&self) -> bool {
+        *self == 0.0
+    }
+}
+impl<'a, T: IsZero> IsZero for &'a T {
+    fn is_zero(&self) -> bool {
+        (*self).is_zero()
+    }
+}
+
+pub fn is_zero<T: IsZero>(x: &T) -> bool {
+    x.is_zero()
 }
 
 impl<'a, T: HasId<'a>> HasId<'a> for Option<T> {
@@ -360,20 +481,17 @@ impl<'a, T: HasId<'a>> HasId<'a> for Option<T> {
 
 #[cfg(test)]
 mod test {
-    use crate::game::context::{DeltaContext, SerContext};
-
-    use super::Delta;
+    use super::{Delta, DeltaContext, SerContext, Serializable};
     use neuro_ftl_derive::Delta;
-
-    #[derive(Debug, Delta)]
-    struct Test {
-        a: i32,
-        b: i32,
-        c: i32,
-    }
 
     #[test]
     fn test() {
+        #[derive(Debug, Delta)]
+        struct Test {
+            a: i32,
+            b: i32,
+            c: i32,
+        }
         let a = Test { a: 0, b: 0, c: 1 };
         let b = Test { a: 1, b: 0, c: 0 };
         let mut ctx = DeltaContext::default();

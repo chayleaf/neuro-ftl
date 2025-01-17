@@ -211,7 +211,7 @@ fn derive_delta2(input: TokenStream) -> TokenStream {
         ident,
         generics,
         data,
-    } = input;
+    } = input.clone();
 
     let syn::Generics {
         lt_token: _,
@@ -273,6 +273,7 @@ fn derive_delta2(input: TokenStream) -> TokenStream {
         .cloned();
 
     let mut fields = TokenStream::new();
+    let mut fields2 = TokenStream::new();
     let mut body1 = TokenStream::new();
     let mut body2 = TokenStream::new();
     let mut body3 = TokenStream::new();
@@ -291,9 +292,24 @@ fn derive_delta2(input: TokenStream) -> TokenStream {
             .iter()
             .find(|x| x.path().to_token_stream().to_string().as_str() == "delta")
             .cloned();
-        let attr1 = attrs
+        let attr1 = if attrs
             .iter()
             .find(|x| x.path().to_token_stream().to_string().as_str() == "delta1")
+            .is_some()
+        {
+            1
+        } else if attrs
+            .iter()
+            .find(|x| x.path().to_token_stream().to_string().as_str() == "delta2")
+            .is_some()
+        {
+            2
+        } else {
+            0
+        };
+        let attr3 = attrs
+            .iter()
+            .find(|x| x.path().to_token_stream().to_string().as_str() == "serde")
             .cloned();
         let path = match attr.as_mut().map(|x| &mut x.meta) {
             None => None,
@@ -305,9 +321,13 @@ fn derive_delta2(input: TokenStream) -> TokenStream {
             path.segments.first_mut().unwrap().ident = Ident::new("serde", Span::call_site());
         }
         body3.extend(quote! {
-            self.#ident.visit(delta_ctx);
+            #ident: self.#ident.serializable(ctx),
         });
-        if attr1.is_some() {
+        fields2.extend(quote! {
+            #attr3
+            #vis #ident: <#ty as Serializable<'delta>>::Ser,
+        });
+        if attr1 == 1 {
             fields.extend(quote! {
                 #attr
                 #vis #ident: &'delta #ty,
@@ -324,6 +344,18 @@ fn derive_delta2(input: TokenStream) -> TokenStream {
             });
             has_id_ident.extend(quote! {
                 &self.#ident,
+            });
+        } else if attr1 == 2 {
+            fields.extend(quote! {
+                #attr
+                #vis #ident: &'delta #ty,
+            });
+            body1.extend(quote! {
+                let #ident = &self.#ident;
+                changed = changed || #ident != &prev.#ident;
+            });
+            body2.extend(quote! {
+                #ident,
             });
         } else {
             fields.extend(quote! {
@@ -342,11 +374,17 @@ fn derive_delta2(input: TokenStream) -> TokenStream {
     }
 
     let name_delta = syn::Ident::new(&(ident.to_string() + "Delta"), Span::call_site());
+    let name_ser = syn::Ident::new(&(ident.to_string() + "Ser"), Span::call_site());
     let mut ret = quote! {
         #[derive(Clone, Debug, serde::Serialize)]
         #attr
         #vis struct #name_delta <#impl_gen2> {
             #fields
+        }
+        #[derive(Clone, Debug, serde::Serialize, PartialEq)]
+        #attr
+        #vis struct #name_ser <#impl_gen2> {
+            #fields2
         }
         impl <#impl_gen2> Delta<'delta> for #ident #ty_gen #wher {
             type Delta = #name_delta <#ty_gen2>;
@@ -360,8 +398,13 @@ fn derive_delta2(input: TokenStream) -> TokenStream {
                     #body2
                 })
             }
-            fn visit(&'delta mut self, delta_ctx: &mut SerContext<'delta>) {
-                #body3
+        }
+        impl <#impl_gen2> Serializable<'delta> for #ident #ty_gen #wher {
+            type Ser = #name_ser <#ty_gen2>;
+            fn serializable(&'delta self, ctx: &mut SerContext<'delta>) -> Self::Ser {
+                Self::Ser {
+                    #body3
+                }
             }
         }
     };
@@ -378,7 +421,7 @@ fn derive_delta2(input: TokenStream) -> TokenStream {
     ret
 }
 
-#[proc_macro_derive(Delta, attributes(serde, delta, delta1))]
+#[proc_macro_derive(Delta, attributes(serde, delta, delta1, delta2))]
 pub fn derive_delta(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     derive_delta2(input.into()).into()
 }
