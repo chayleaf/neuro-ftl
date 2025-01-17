@@ -5020,7 +5020,9 @@ fn system_levels(
         .collect()
 }
 
-impl<T: serde::Serialize + Ord + std::fmt::Debug> From<bindings::Pair<T, T>> for context::Pair<T> {
+impl<T: serde::Serialize + Ord + std::fmt::Debug + for<'a> Delta<'a>> From<bindings::Pair<T, T>>
+    for context::Pair<T>
+{
     fn from(value: bindings::Pair<T, T>) -> Self {
         Self {
             current: value.first,
@@ -6403,15 +6405,18 @@ pub fn loop_hook2(app: &mut CApp) {
             log::error!("error starting up: {err}");
         }
     }
-    let ctx = collect_context(app, game.buffer.as_ref());
+    let mut ctx = collect_context(app, game.buffer.as_ref());
     if let Some(buf) = game.buffer.take() {
-        if let Some(delta) = ctx.delta(&buf) {
+        if let Some(delta) = ctx.delta(&buf, &mut context::util::DeltaContext::default()) {
             if let Err(err) = game.context(format!("Game state changes (not the entire state). If you forgot something, use the `remind` action.\n\n{}", serde_json::to_string(&delta).unwrap()), false) {
                 log::error!("error sending context delta: {err}");
             }
         }
-    } else if let Err(err) = game.context(format!("This is the current game state in JSON format. After this, you won't receive full state snapshots anymore, only the changed parts. If you forgot something, use the `remind` action to resend context about something.\n\n{}", serde_json::to_string(&ctx).unwrap()), false) {
-        log::error!("error sending initial context: {err}");
+    } else {
+        ctx.visit(&mut context::util::SerContext::default());
+        if let Err(err) = game.context(format!("This is the current game state in JSON format. After this, you won't receive full state snapshots anymore, only the changed parts. If you forgot something, use the `remind` action to resend context about something.\n\n{}", serde_json::to_string(&ctx).unwrap()), false) {
+            log::error!("error sending initial context: {err}");
+        }
     }
     game.buffer = Some(ctx);
     if let Some(mut force) = game.actions.force.clone() {

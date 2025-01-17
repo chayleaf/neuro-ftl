@@ -275,6 +275,7 @@ fn derive_delta2(input: TokenStream) -> TokenStream {
     let mut fields = TokenStream::new();
     let mut body1 = TokenStream::new();
     let mut body2 = TokenStream::new();
+    let mut body3 = TokenStream::new();
     let mut has_id_ty = TokenStream::new();
     let mut has_id_ident = TokenStream::new();
     for field in fields1.named {
@@ -303,6 +304,9 @@ fn derive_delta2(input: TokenStream) -> TokenStream {
         if let Some(path) = path {
             path.segments.first_mut().unwrap().ident = Ident::new("serde", Span::call_site());
         }
+        body3.extend(quote! {
+            self.#ident.visit(delta_ctx);
+        });
         if attr1.is_some() {
             fields.extend(quote! {
                 #attr
@@ -328,7 +332,7 @@ fn derive_delta2(input: TokenStream) -> TokenStream {
                 #vis #ident: Option<<#ty as Delta<'delta>>::Delta>,
             });
             body1.extend(quote! {
-                let #ident = self.#ident.delta(&prev.#ident);
+                let #ident = self.#ident.delta(&prev.#ident, delta_ctx);
                 changed = changed || #ident.is_some();
             });
             body2.extend(quote! {
@@ -346,7 +350,7 @@ fn derive_delta2(input: TokenStream) -> TokenStream {
         }
         impl <#impl_gen2> Delta<'delta> for #ident #ty_gen #wher {
             type Delta = #name_delta <#ty_gen2>;
-            fn delta(&'delta self, prev: &'delta Self) -> Option<Self::Delta> {
+            fn delta(&'delta self, prev: &'delta Self, delta_ctx: &mut DeltaContext<'delta>) -> Option<Self::Delta> {
                 let mut changed = false;
                 #body1
                 if !changed {
@@ -355,6 +359,9 @@ fn derive_delta2(input: TokenStream) -> TokenStream {
                 Some(Self::Delta {
                     #body2
                 })
+            }
+            fn visit(&'delta mut self, delta_ctx: &mut SerContext<'delta>) {
+                #body3
             }
         }
     };

@@ -494,8 +494,14 @@ impl<'a> HasId<'a> for AnyItemInfo {
 
 impl<'a> Delta<'a> for AnyItemInfo {
     type Delta = &'a AnyItemInfo;
-    fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
+    fn delta(&'a self, prev: &'a Self, _ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
         (self != prev).then_some(self)
+    }
+    fn visit(&'a mut self, ctx: &mut SerContext<'a>) {
+        match self {
+            Self::Weapon(x) => x.visit(ctx),
+            Self::Drone(x) => x.visit(ctx),
+        }
     }
 }
 
@@ -614,21 +620,21 @@ pub struct Context {
 }
 
 #[derive(Copy, Clone, Debug, Default, Delta, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct Pair<T: std::fmt::Debug + Ord + Serialize> {
+pub struct Pair<T: std::fmt::Debug + Ord + Serialize + for<'a> Delta<'a>> {
     #[delta1]
     pub current: T,
     #[delta1]
     pub max: T,
 }
 
-impl<T: std::fmt::Debug + Ord + Serialize + From<bool>> Pair<T> {
+impl<T: std::fmt::Debug + Ord + Serialize + From<bool> + for<'a> Delta<'a>> Pair<T> {
     pub fn is_zero(&self) -> bool {
         is_zero(&self.current) && is_zero(&self.max)
     }
 }
 
 #[derive(Copy, Clone, Debug, Default, Delta, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct Point<T: std::fmt::Debug + Ord + Serialize> {
+pub struct Point<T: std::fmt::Debug + Ord + Serialize + for<'a> Delta<'a>> {
     #[delta1]
     pub x: T,
     #[delta1]

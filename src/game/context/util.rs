@@ -1,9 +1,21 @@
 use serde::Serialize;
-use std::{borrow::Cow, cmp::Ordering, collections::BTreeMap};
+use std::{
+    borrow::Cow,
+    cmp::Ordering,
+    collections::{BTreeMap, HashSet},
+};
+
+#[derive(Debug, Default)]
+pub struct DeltaContext<'a>(HashSet<&'a str>);
+#[derive(Debug, Default)]
+pub struct SerContext<'a>(HashSet<&'a str>);
 
 pub trait Delta<'a> {
     type Delta: std::fmt::Debug + Serialize;
-    fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta>;
+    fn delta(&'a self, prev: &'a Self, ctx: &mut DeltaContext<'a>) -> Option<Self::Delta>;
+    fn visit(&'a mut self, ctx: &mut SerContext<'a>) {
+        let _ = ctx;
+    }
 }
 
 #[macro_export]
@@ -11,7 +23,7 @@ macro_rules! impl_delta {
     ($($t:ty),*) => {
         $(impl<'a> Delta<'a> for $t {
             type Delta = &'a Self;
-            fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
+            fn delta(&'a self, prev: &'a Self, _ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
                 (self != prev).then_some(self)
             }
         })*
@@ -20,21 +32,21 @@ macro_rules! impl_delta {
 
 impl<'a, 'b: 'a> Delta<'a> for &'b str {
     type Delta = &'a str;
-    fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
+    fn delta(&'a self, prev: &'a Self, _ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
         (self != prev).then_some(self)
     }
 }
 
 impl<'a> Delta<'a> for f64 {
     type Delta = &'a Self;
-    fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
+    fn delta(&'a self, prev: &'a Self, _ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
         (self.to_bits() != prev.to_bits()).then_some(self)
     }
 }
 
 impl<'a> Delta<'a> for f32 {
     type Delta = &'a Self;
-    fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
+    fn delta(&'a self, prev: &'a Self, _ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
         (self.to_bits() != prev.to_bits()).then_some(self)
     }
 }
@@ -84,12 +96,17 @@ impl<T: Serialize, Y: Serialize> Serialize for Opt3<T, Y> {
 
 impl<'a, T: 'a + std::fmt::Debug + Serialize + Eq + Delta<'a>> Delta<'a> for Option<T> {
     type Delta = Opt3<&'a T, T::Delta>;
-    fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
+    fn delta(&'a self, prev: &'a Self, ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
         match (prev, self) {
             (None, None) => None,
-            (Some(old), Some(new)) => new.delta(old).map(Opt3::Y),
+            (Some(old), Some(new)) => new.delta(old, ctx).map(Opt3::Y),
             (None, Some(x)) => Some(Opt3::T(x)),
             (Some(_), None) => Some(Opt3::None),
+        }
+    }
+    fn visit(&'a mut self, ctx: &mut SerContext<'a>) {
+        if let Some(val) = self.as_mut() {
+            val.visit(ctx);
         }
     }
 }
@@ -104,7 +121,7 @@ pub enum Operations<A, B> {
 
 impl<'a, T: 'a + Clone + std::fmt::Debug + Delta<'a> + HasId<'a> + Serialize> Delta<'a> for Vec<T> {
     type Delta = Opt3<Vec<Operations<T, T::Delta>>, &'a [T]>;
-    fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
+    fn delta(&'a self, prev: &'a Self, ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
         if self.is_empty() && !prev.is_empty() {
             return Some(Opt3::None);
         }
@@ -146,7 +163,7 @@ impl<'a, T: 'a + Clone + std::fmt::Debug + Delta<'a> + HasId<'a> + Serialize> De
                         ret.push(Operations::Removed(that.next().unwrap().clone()))
                     }
                     Ordering::Equal => {
-                        if let Some(delta) = this.next().unwrap().delta(that.next().unwrap()) {
+                        if let Some(delta) = this.next().unwrap().delta(that.next().unwrap(), ctx) {
                             ret.push(Operations::Changed(delta))
                         }
                     }
@@ -154,6 +171,11 @@ impl<'a, T: 'a + Clone + std::fmt::Debug + Delta<'a> + HasId<'a> + Serialize> De
             }
         }
         (!ret.is_empty()).then_some(Opt3::T(ret))
+    }
+    fn visit(&'a mut self, ctx: &mut SerContext<'a>) {
+        for val in self {
+            val.visit(ctx);
+        }
     }
 }
 
@@ -164,11 +186,16 @@ impl<
     > Delta<'a> for BTreeMap<K, T>
 {
     type Delta = Option<&'a BTreeMap<K, T>>;
-    fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
+    fn delta(&'a self, prev: &'a Self, _ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
         if self == prev {
             None
         } else {
             Some(if self.is_empty() { None } else { Some(self) })
+        }
+    }
+    fn visit(&'a mut self, ctx: &mut SerContext<'a>) {
+        for val in self.values_mut() {
+            val.visit(ctx);
         }
     }
 }
@@ -179,7 +206,7 @@ where
     <Cow<'a, T> as ToOwned>::Owned: std::fmt::Debug,
 {
     type Delta = Cow<'a, T>;
-    fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
+    fn delta(&'a self, prev: &'a Self, _ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
         (self != prev).then(|| Cow::Borrowed(self.as_ref()))
     }
 }
@@ -206,24 +233,39 @@ impl<'a> HasId<'a> for String {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct Help<T> {
+#[derive(Clone, Debug, Serialize, Ord, PartialOrd, Hash)]
+pub struct Help2<'a, T> {
     pub value: T,
-    pub help: Cow<'static, str>,
+    pub help: Cow<'a, str>,
+    pub ser_show: bool,
 }
+
+impl<'a, T: PartialEq> PartialEq for Help2<'a, T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl<'a, T: Eq> Eq for Help2<'a, T> {}
+
+#[derive(Clone, Debug, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[serde(transparent)]
+#[repr(transparent)]
+pub struct Help<T>(Help2<'static, T>);
 
 impl<T> Help<T> {
     pub fn new(help: impl Into<Cow<'static, str>>, value: T) -> Self {
-        Self {
+        Self(Help2 {
             value,
             help: help.into(),
-        }
+            ser_show: true,
+        })
     }
 }
 
 impl<T: From<bool> + PartialEq> Help<T> {
     pub fn is_zero(&self) -> bool {
-        self.value == T::from(false)
+        self.0.value == T::from(false)
     }
 }
 
@@ -231,9 +273,18 @@ impl<'a, T: Serialize> Delta<'a> for Help<T>
 where
     T: Delta<'a>,
 {
-    type Delta = <T as Delta<'a>>::Delta;
-    fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
-        self.value.delta(&prev.value)
+    type Delta = Help2<'a, <T as Delta<'a>>::Delta>;
+    fn delta(&'a self, prev: &'a Self, ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
+        let show = ctx.0.insert(&self.0.help);
+        self.0.value.delta(&prev.0.value, ctx).map(|x| Help2 {
+            ser_show: show,
+            value: x,
+            help: Cow::Borrowed(&self.0.help),
+        })
+    }
+    fn visit(&'a mut self, ctx: &mut SerContext<'a>) {
+        self.0.ser_show = ctx.0.insert(&self.0.help);
+        self.0.value.visit(ctx);
     }
 }
 
@@ -271,7 +322,7 @@ macro_rules! impl_quantized {
 
         impl<'a, const X: $ty> Delta<'a> for $name<X> {
             type Delta = $ty;
-            fn delta(&'a self, prev: &'a Self) -> Option<Self::Delta> {
+            fn delta(&'a self, prev: &'a Self, _ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
                 ((self.0 / X) != (prev.0 / X)).then_some(self.0)
             }
         }
@@ -309,6 +360,8 @@ impl<'a, T: HasId<'a>> HasId<'a> for Option<T> {
 
 #[cfg(test)]
 mod test {
+    use crate::game::context::{DeltaContext, SerContext};
+
     use super::Delta;
     use neuro_ftl_derive::Delta;
 
@@ -323,12 +376,13 @@ mod test {
     fn test() {
         let a = Test { a: 0, b: 0, c: 1 };
         let b = Test { a: 1, b: 0, c: 0 };
-        let x = b.delta(&a);
+        let mut ctx = DeltaContext::default();
+        let x = b.delta(&a, &mut ctx);
         assert_eq!(
             serde_json::to_string(&x).unwrap().as_str(),
             r#"{"a":1,"c":0}"#
         );
-        let x = b.delta(&b);
+        let x = b.delta(&b, &mut ctx);
         assert_eq!(serde_json::to_string(&x).unwrap().as_str(), r#"null"#)
     }
 }
