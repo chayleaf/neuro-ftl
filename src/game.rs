@@ -3113,11 +3113,20 @@ impl neuro_sama::game::GameMut for State {
                 } else {
                     let gui = app.gui().unwrap();
                     let mgr = gui.ship_manager().unwrap();
+                    let sensors = mgr
+                        .system(System::Sensors)
+                        .map(|x| x.effective_power())
+                        .unwrap_or_default();
                     let desc = match event.ship {
-                        TargetShip::Player => Some(ship_manager_desc(mgr, Some(&gui.equip_screen))),
-                        TargetShip::Enemy => {
-                            mgr.current_target().map(|x| ship_manager_desc(x, None))
-                        }
+                        TargetShip::Player => Some(ship_manager_desc(
+                            mgr,
+                            Some(&gui.equip_screen),
+                            sensors,
+                            self.buffer.as_ref(),
+                        )),
+                        TargetShip::Enemy => mgr
+                            .current_target()
+                            .map(|x| ship_manager_desc(x, None, sensors, self.buffer.as_ref())),
                     };
                     if let Some(mut desc) = desc {
                         let actions::RememberShipInfo {
@@ -3231,23 +3240,39 @@ impl neuro_sama::game::GameMut for State {
     }
 }
 
-fn reactor_state(ship_id: i32) -> Option<context::ReactorState> {
+fn reactor_state(
+    ship_id: i32,
+    sensors: i32,
+    old_context: Option<&context::Context>,
+) -> Option<context::ReactorState> {
     let mgr = power_manager(ship_id)?;
-    Some(context::ReactorState {
-        power: context::Pair {
-            current: mgr.current_power.first,
-            max: (mgr.current_power.second - mgr.i_hacked - mgr.i_temp_power_loss)
-                .min(mgr.i_temp_power_cap),
-        },
-        battery_power: context::Pair {
-            current: mgr.battery_power.first,
-            max: mgr.battery_power.second,
-        },
-        reduced_capacity: mgr.i_temp_power_loss != 0
-            || mgr.i_temp_power_cap < mgr.current_power.second
-            || mgr.i_hacked != 0,
-        hacked: mgr.i_hacked > 0,
-    })
+    if sensors >= 4 || ship_id == 0 {
+        Some(context::ReactorState {
+            power: context::Pair {
+                current: mgr.current_power.first,
+                max: (mgr.current_power.second - mgr.i_hacked - mgr.i_temp_power_loss)
+                    .min(mgr.i_temp_power_cap),
+            },
+            battery_power: context::Pair {
+                current: mgr.battery_power.first,
+                max: mgr.battery_power.second,
+            },
+            reduced_capacity: mgr.i_temp_power_loss != 0
+                || mgr.i_temp_power_cap < mgr.current_power.second
+                || mgr.i_hacked != 0,
+            hacked: mgr.i_hacked > 0,
+            stale_info: false,
+        })
+    } else {
+        let mut ret = if ship_id == 0 {
+            old_context?.player_ship.as_ref()?
+        } else {
+            old_context?.enemy_ship.as_ref()?
+        }
+        .reactor?;
+        ret.stale_info = true;
+        Some(ret)
+    }
 }
 
 static mut GAME: OnceLock<State> = OnceLock::new();
@@ -4232,6 +4257,7 @@ fn room_desc(
             .unwrap_or_default()
             .into(),
         hacked: room.i_hack_level > 1,
+        stale_info: false,
     }
 }
 
@@ -4456,6 +4482,7 @@ fn crew_desc<'a>(crew: &'a bindings::CrewMember, map: &mut IdMap<'a>) -> context
                     "??? BUG IN THE MOD"
                 }
             }),
+        stale_info: false,
     }
 }
 
@@ -4650,6 +4677,7 @@ fn crew_bp_desc<'a>(
         manning: None,
         repairing: None,
         sabotaging: None,
+        stale_info: false,
     }
 }
 
@@ -4717,6 +4745,7 @@ fn drone_desc<'a>(drone: &'a bindings::Drone, map: &mut IdMap<'a>) -> context::D
         health,
         location,
         weapon,
+        stale_info: false,
     }
 }
 
@@ -4757,6 +4786,7 @@ fn drone_bp_desc<'a>(
         }),
         location: None,
         weapon: None,
+        stale_info: false,
     }
 }
 
@@ -4800,6 +4830,7 @@ fn weapon_bp_desc<'a>(
         required_power: weapon.power,
         powered: None,
         hacked: false,
+        stale_info: false,
     }
 }
 
@@ -4847,6 +4878,7 @@ fn weapon_desc<'a>(
         required_power: weapon.required_power(),
         powered: Some(weapon.powered),
         hacked: weapon.i_hack_level > 1,
+        stale_info: false,
     }
 }
 
@@ -4915,10 +4947,10 @@ fn system_levels(
             Some(Cow::Borrowed(text("pilot_3"))),
         ],
         System::Sensors => vec![
-            Some(Cow::Borrowed(text("sensor_1"))),
-            Some(Cow::Borrowed(text("sensor_2"))),
-            Some(Cow::Borrowed(text("sensor_3"))),
-            Some(Cow::Borrowed(text("sensor_4"))),
+            Some(Cow::Borrowed(strings::SENSORS_LEVEL1)),
+            Some(Cow::Borrowed(strings::SENSORS_LEVEL2)),
+            Some(Cow::Borrowed(strings::SENSORS_LEVEL3)),
+            Some(Cow::Borrowed(strings::SENSORS_LEVEL4)),
         ],
         System::Doors => vec![
             Some(Cow::Borrowed(text("door_1"))),
@@ -4997,7 +5029,12 @@ impl<T: serde::Serialize + Ord + std::fmt::Debug> From<bindings::Pair<T, T>> for
     }
 }
 
-fn system_desc(system: &bindings::ShipSystem, map: &mut IdMap<'static>) -> context::SystemInfo {
+fn system_desc(
+    system: &bindings::ShipSystem,
+    map: &mut IdMap<'static>,
+    sensors: i32,
+    old_context: Option<&context::Context>,
+) -> context::SystemInfo {
     let sys = System::from_id(system.i_system_type).unwrap();
     let bp = sys.blueprint().unwrap();
     let levels: Vec<_> = system_levels(
@@ -5006,7 +5043,7 @@ fn system_desc(system: &bindings::ShipSystem, map: &mut IdMap<'static>) -> conte
         system.effective_power(),
         system.power_state.second,
     );
-    let reactor = reactor_state(system.i_ship_id);
+    let reactor = reactor_state(system.i_ship_id, sensors, old_context);
     context::SystemInfo {
         faction: if system.i_ship_id == 0 {
             ShipId::Player
@@ -5182,6 +5219,7 @@ fn system_desc(system: &bindings::ShipSystem, map: &mut IdMap<'static>) -> conte
                 &mut IdMap::new(),
             )
         }),
+        stale_info: false,
     }
 }
 
@@ -5274,6 +5312,7 @@ fn system_bp_desc<'a>(
         }),
         ship_oxygen_level: None,
         artillery_weapon: None,
+        stale_info: false,
     }
 }
 
@@ -5329,6 +5368,8 @@ fn repair_bp_desc(repair_all: bool, cost: i32) -> context::RepairInfo {
 fn ship_manager_desc(
     mgr: &bindings::ShipManager,
     eq: Option<&bindings::Equipment>,
+    sensors: i32,
+    old_context: Option<&context::Context>,
 ) -> context::ShipInfo {
     let doors_short: Vec<Vec<context::DoorInfoShort>> = mgr
         .ship
@@ -5428,12 +5469,40 @@ fn ship_manager_desc(
                 ret
             })
     });
+    let old = old_context.and_then(|x| {
+        if mgr.i_ship_id == 0 {
+            x.player_ship.as_ref()
+        } else {
+            x.enemy_ship.as_ref()
+        }
+    });
+    let mut old_systems = HashMap::new();
+    for x in old.iter().flat_map(|x| x.systems.iter()) {
+        old_systems.insert(&x.system_name, x);
+    }
+    let mut old_rooms = HashMap::new();
+    for x in old.iter().flat_map(|x| x.rooms.iter()) {
+        old_rooms.insert(x.room_id, x);
+    }
+    let mut old_crew = HashMap::new();
+    for x in old.iter().flat_map(|x| x.crew.iter()) {
+        old_crew.insert(&x.crew_member_name, x);
+    }
+    let mut new_rooms = HashMap::new();
+    for x in mgr
+        .ship
+        .v_room_list
+        .iter()
+        .filter_map(|x| unsafe { xc(*x) })
+    {
+        new_rooms.insert(x.i_room_id, x);
+    }
     context::ShipInfo {
         destroyed: mgr.b_destroyed,
         hull: Help::new(text("tooltip_hull"), mgr.ship.hull_integrity.into()),
         evasion_chance_percentage: mgr.dodge_factor(),
         ship_name: mgr.my_blueprint.name.to_str().into_owned(),
-        reactor: reactor_state(mgr.i_ship_id),
+        reactor: reactor_state(mgr.i_ship_id, sensors, old_context),
         faction: if mgr.i_ship_id == 0 {
             ShipId::Player
         } else {
@@ -5443,16 +5512,26 @@ fn ship_manager_desc(
             .ship
             .v_room_list
             .iter()
-            .map(|x| {
+            .filter_map(|x| {
                 let room = unsafe { xc(*x).unwrap() };
-                room_desc(
-                    room,
-                    mgr,
-                    &doors_short,
-                    &crew_short,
-                    &intruders_short,
-                    &system_map,
-                )
+                if room.b_blacked_out {
+                    if let Some(room) = old_rooms.get(&(room.i_room_id as u32)) {
+                        let mut info = (*room).clone();
+                        info.stale_info = true;
+                        Some(info)
+                    } else {
+                        None
+                    }
+                } else {
+                    Some(room_desc(
+                        room,
+                        mgr,
+                        &doors_short,
+                        &crew_short,
+                        &intruders_short,
+                        &system_map,
+                    ))
+                }
             })
             .collect(),
         doors: mgr
@@ -5467,9 +5546,25 @@ fn ship_manager_desc(
         crew: IdMap::with(|map| {
             mgr.v_crew_list
                 .iter()
-                .map(|x| {
+                .filter_map(|x| {
                     let crew = unsafe { xc(*x).unwrap() };
-                    crew_desc(crew, map)
+                    // call the func either way for filling out the map
+                    let desc = crew_desc(crew, map);
+                    if mgr.i_ship_id == 0
+                        || desc.dead
+                        || !new_rooms
+                            .get(&crew.i_room_id)
+                            .is_some_and(|x| x.b_blacked_out)
+                    {
+                        Some(desc)
+                    } else if let Some(desc) = old_crew.get(&desc.crew_member_name) {
+                        let mut desc = (*desc).clone();
+                        desc.stale_info = true;
+                        desc.location = None;
+                        Some(desc)
+                    } else {
+                        None
+                    }
                 })
                 .collect()
         }),
@@ -5480,12 +5575,18 @@ fn ship_manager_desc(
                     x.drones
                         .iter()
                         .enumerate()
-                        .map(|(i, x)| {
-                            context::ItemSlot::new1(
+                        .filter_map(|(i, x)| {
+                            // call the func either way for filling out the map
+                            let desc = drone_desc(unsafe { xc(*x).unwrap() }, map);
+                            Some(context::ItemSlot::new1(
                                 context::InventorySlotType::Drone,
                                 i + 1,
-                                drone_desc(unsafe { xc(*x).unwrap() }, map),
-                            )
+                                if mgr.i_ship_id == 0 || sensors >= 3 {
+                                    desc
+                                } else {
+                                    return old.and_then(|x| x.drones.get(i)).cloned();
+                                },
+                            ))
                         })
                         .collect()
                 });
@@ -5505,12 +5606,18 @@ fn ship_manager_desc(
                     x.weapons
                         .iter()
                         .enumerate()
-                        .map(|(i, x)| {
-                            context::ItemSlot::new1(
+                        .filter_map(|(i, x)| {
+                            let desc = weapon_desc(unsafe { xc(*x).unwrap() }, map);
+                            // call the func either way for filling out the map
+                            Some(context::ItemSlot::new1(
                                 context::InventorySlotType::Weapon,
                                 i + 1,
-                                weapon_desc(unsafe { xc(*x).unwrap() }, map),
-                            )
+                                if mgr.i_ship_id == 0 || sensors >= 3 {
+                                    desc
+                                } else {
+                                    return old.and_then(|x| x.weapons.get(i)).cloned();
+                                },
+                            ))
                         })
                         .collect()
                 });
@@ -5526,9 +5633,22 @@ fn ship_manager_desc(
         systems: IdMap::with(|map| {
             mgr.v_system_list
                 .iter()
-                .map(|x| {
+                .filter_map(|x| {
                     let system = unsafe { xc(*x).unwrap() };
-                    system_desc(system, map)
+                    if mgr.i_ship_id == 0 || sensors >= 4 {
+                        Some(system_desc(system, map, sensors, old_context))
+                    } else {
+                        let sys = System::from_id(system.i_system_type).unwrap();
+                        let bp = sys.blueprint().unwrap();
+                        let name = map.map(bp.title.to_str().into());
+                        if let Some(old) = old_systems.get(&name) {
+                            let mut ret = (*old).clone();
+                            ret.stale_info = true;
+                            Some(ret)
+                        } else {
+                            None
+                        }
+                    }
                 })
                 .collect()
         }),
@@ -5991,13 +6111,19 @@ fn event_options(gui: &bindings::CommandGui) -> (Option<String>, Vec<String>) {
         .unwrap_or_default()
 }
 
-fn collect_context(app: &CApp) -> context::Context {
+fn collect_context(app: &CApp, old_context: Option<&context::Context>) -> context::Context {
     if app.lang_chooser.base.b_open {
         return Default::default();
     }
     if !app.game_logic {
         return Default::default();
     }
+    let sensors = app
+        .gui()
+        .and_then(|x| x.ship_manager())
+        .and_then(|x| x.system(System::Sensors))
+        .map(|x| x.effective_power())
+        .unwrap_or_default();
     if app.menu.b_open {
         if app.menu.b_credit_screen {
             return context::Context {
@@ -6054,7 +6180,11 @@ fn collect_context(app: &CApp) -> context::Context {
                     }),
                 player_ship: Some(context::ShipInfo {
                     ship_name: app.menu.ship_builder.current_name.to_str().into_owned(),
-                    ..ship_manager_desc(s, None)
+                    ..{
+                        let mut desc = ship_manager_desc(s, None, sensors, old_context);
+                        desc.doors.clear();
+                        desc
+                    }
                 }),
                 enemy_ship: None,
                 ..Default::default()
@@ -6128,8 +6258,21 @@ fn collect_context(app: &CApp) -> context::Context {
         event_text,
         event_options,
         current_store_page: store_page(app, false),
-        player_ship: Some(ship_manager_desc(mgr, Some(&gui.equip_screen))),
-        enemy_ship: mgr.current_target().map(|x| ship_manager_desc(x, None)),
+        player_ship: Some(ship_manager_desc(
+            mgr,
+            Some(&gui.equip_screen),
+            sensors,
+            old_context,
+        )),
+        enemy_ship: mgr.current_target().map(|x| {
+            let mut desc = ship_manager_desc(x, None, sensors, old_context);
+            // doors for the enemy ship are kinda useless
+            desc.doors.clear();
+            for room in &mut desc.rooms {
+                room.doors.clear();
+            }
+            desc
+        }),
         inventory: Some(inventory(gui)),
     }
 }
@@ -6260,7 +6403,7 @@ pub fn loop_hook2(app: &mut CApp) {
             log::error!("error starting up: {err}");
         }
     }
-    let ctx = collect_context(app);
+    let ctx = collect_context(app, game.buffer.as_ref());
     if let Some(buf) = game.buffer.take() {
         if let Some(delta) = ctx.delta(&buf) {
             if let Err(err) = game.context(format!("Game state changes (not the entire state). If you forgot something, use the `remind` action.\n\n{}", serde_json::to_string(&delta).unwrap()), false) {

@@ -1,5 +1,10 @@
 pub const BUG: &str = "??? BUG IN THE MOD";
 
+pub const SENSORS_LEVEL1: &str = "See all room info in the player ship. Without this, only rooms with your crew members are shown.";
+pub const SENSORS_LEVEL2: &str = "See all room and crew info in the enemy ship";
+pub const SENSORS_LEVEL3: &str = "See enemy weapon and drone info";
+pub const SENSORS_LEVEL4: &str = "See enemy system info";
+
 pub const LOC_BASE: &str =
     "This is the Federation Base. You have to protect it from the rebels' flagship.";
 pub const LOC_EXIT: &str = "This is the exit beacon. Here you can travel to the next sector.";

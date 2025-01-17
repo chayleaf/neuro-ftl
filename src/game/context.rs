@@ -72,6 +72,8 @@ pub struct WeaponInfo {
     pub powered: Option<bool>,
     #[serde(skip_serializing_if = "is_zero")]
     pub hacked: bool,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub stale_info: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Delta, Eq, PartialEq)]
@@ -110,6 +112,8 @@ pub struct DroneInfo {
     // for space
     #[serde(skip_serializing_if = "Option::is_none")]
     pub weapon: Option<WeaponInfo>,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub stale_info: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Delta, Eq, PartialEq)]
@@ -168,9 +172,10 @@ pub struct SystemLevel {
     pub active: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Delta, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Serialize, Delta, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ReactorState {
+    #[serde(skip_serializing_if = "Pair::is_zero")]
     pub power: Pair<i32>,
     #[serde(skip_serializing_if = "Pair::is_zero")]
     pub battery_power: Pair<i32>,
@@ -178,6 +183,8 @@ pub struct ReactorState {
     pub reduced_capacity: bool,
     #[serde(skip_serializing_if = "is_zero")]
     pub hacked: bool,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub stale_info: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Delta, Eq, PartialEq)]
@@ -254,6 +261,8 @@ pub struct SystemInfo {
     // for artillery
     #[serde(skip_serializing_if = "Option::is_none")]
     pub artillery_weapon: Option<WeaponInfo>,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub stale_info: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Delta, Eq, PartialEq, Default)]
@@ -291,8 +300,11 @@ pub struct RoomInfo {
     pub faction: ShipId,
     #[delta1]
     pub room_id: u32,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub doors: Vec<DoorInfoShort>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub crew_member_names: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub intruder_names: Vec<String>,
     #[delta1]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -303,6 +315,8 @@ pub struct RoomInfo {
     pub oxygen_percentage: QuantizedI32<25>,
     #[serde(skip_serializing_if = "is_zero")]
     pub hacked: bool,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub stale_info: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Delta, Eq, PartialEq)]
@@ -429,6 +443,8 @@ pub struct CrewInfo {
     pub repairing: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sabotaging: Option<&'static str>,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub stale_info: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Delta, Eq, PartialEq)]
@@ -441,12 +457,19 @@ pub struct ShipInfo {
     pub destroyed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reactor: Option<ReactorState>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub rooms: Vec<RoomInfo>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub doors: Vec<DoorInfo>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub systems: Vec<SystemInfo>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub crew: Vec<CrewInfo>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub weapons: Vec<ItemSlot<WeaponInfo>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub drones: Vec<ItemSlot<DroneInfo>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub augments: Vec<ItemSlot<AugmentInfo>>,
     pub hull: Help<Pair<i32>>,
     pub evasion_chance_percentage: i32,
@@ -487,6 +510,7 @@ pub struct Inventory {
     pub overcapacity_slot: ItemSlot<AnyItemInfo>,
     #[serde(skip_serializing_if = "ItemSlot::is_empty")]
     pub augment_overcapacity_slot: ItemSlot<AugmentInfo>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub cargo_slots: Vec<ItemSlot<AnyItemInfo>>,
 }
 
