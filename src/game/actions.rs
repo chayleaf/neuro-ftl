@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use neuro_ftl_derive::JsonSchemaNoRef;
 use neuro_sama::derive::Actions;
 use schemars::JsonSchema;
@@ -405,6 +407,54 @@ pub struct SelectShip {
     pub ship_name: String,
 }
 
+#[derive(Copy, Clone, Debug, Deserialize, JsonSchemaNoRef)]
+#[serde(rename_all = "snake_case")]
+pub enum RememberType {
+    #[allow(unused)]
+    Inventory,
+    #[allow(unused)]
+    Store,
+    #[allow(unused)]
+    CurrentLocation,
+    #[allow(unused)]
+    StarMap,
+    #[allow(unused)]
+    SectorMap,
+    #[allow(unused)]
+    CurrentEvent,
+    #[allow(unused)]
+    Everything,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Remember {
+    pub what: RememberType,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RememberShipInfo {
+    pub ship: TargetShip,
+    #[serde(default)]
+    pub include_reactor_info: bool,
+    #[serde(default)]
+    pub room_ids: Option<HashSet<u32>>,
+    #[serde(default)]
+    pub door_ids: Option<HashSet<i32>>,
+    #[serde(default)]
+    pub system_names: Option<HashSet<String>>,
+    #[serde(default)]
+    pub crew_member_names: Option<HashSet<String>>,
+    #[serde(default)]
+    pub weapon_names: Option<HashSet<String>>,
+    #[serde(default)]
+    pub drone_names: Option<HashSet<String>>,
+    #[serde(default)]
+    pub augment_names: Option<HashSet<String>>,
+}
+
+#[allow(clippy::large_enum_variant)]
 #[derive(Actions, Debug)]
 pub enum FtlActions {
     /// Skip credits
@@ -653,4 +703,11 @@ pub enum FtlActions {
     /// Select a ship layout/variation by its name. It must be unlocked.
     #[name = "select_ship"]
     SelectShip(SelectShip),
+    /// Remember a part of the global context. See also: `remember_ship`.
+    #[name = "remember"]
+    Remember(Remember),
+    /// Remember a part of the ship info. All fields are optional! If you pass an empty list, all
+    /// info is sent - for example, {"weaponNames":[]} will send info about all weapons.
+    #[name = "remember_ship_info"]
+    RememberShipInfo(RememberShipInfo),
 }

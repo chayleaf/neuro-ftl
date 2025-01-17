@@ -1035,7 +1035,7 @@ impl<T> Vector<T> {
     }
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = &T> {
         if self.start.is_null() {
-            (&[]).iter()
+            [].iter()
         } else {
             unsafe { std::slice::from_raw_parts(self.start, self.len()) }.iter()
         }

@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use actions::{FtlActions, InventorySlotType, TargetShip};
+use actions::{FtlActions, InventorySlotType, RememberType, TargetShip};
 use context::{
     util::{Delta, Help},
     ShipId, SystemLevel,
@@ -3045,6 +3045,173 @@ impl neuro_sama::game::GameMut for State {
                     Ok(Cow::from("successfully opened the inventory screen").into())
                 }
             }
+            FtlActions::Remember(event) => {
+                if !self.actions.valid(&event) {
+                    Err(Cow::from("can't remember context at the moment").into())
+                } else {
+                    let mut ret = context::Context::default();
+                    if matches!(
+                        event.what,
+                        RememberType::Everything | RememberType::Inventory
+                    ) {
+                        ret.inventory = Some(inventory(app.gui().unwrap()));
+                    }
+                    if matches!(event.what, RememberType::Everything | RememberType::Store) {
+                        ret.current_store_page = store_page(app, true);
+                    }
+                    if matches!(
+                        event.what,
+                        RememberType::Everything | RememberType::CurrentLocation
+                    ) {
+                        let gui = app.gui().unwrap();
+                        ret.current_location = gui
+                            .star_map()
+                            .and_then(|x| x.current_loc())
+                            .map(|x| location(gui.star_map().unwrap(), x))
+                    }
+                    if matches!(event.what, RememberType::Everything | RememberType::StarMap) {
+                        let gui = app.gui().unwrap();
+                        ret.locations = gui
+                            .star_map()
+                            .map(|s| locations(s, &gui.equip_screen))
+                            .unwrap_or_default();
+                    }
+                    if matches!(
+                        event.what,
+                        RememberType::Everything | RememberType::SectorMap
+                    ) {
+                        let gui = app.gui().unwrap();
+                        ret.sectors = gui.star_map().map(sectors).unwrap_or_default();
+                    }
+                    if matches!(
+                        event.what,
+                        RememberType::Everything | RememberType::CurrentEvent
+                    ) {
+                        let gui = app.gui().unwrap();
+                        let (event_text, event_options) = event_options(gui);
+                        ret.event_text = event_text;
+                        ret.event_options = event_options;
+                    }
+                    match event.what {
+                        RememberType::Inventory => {}
+                        RememberType::Store => {}
+                        RememberType::CurrentLocation => {}
+                        RememberType::StarMap => {}
+                        RememberType::SectorMap => {}
+                        RememberType::CurrentEvent => {}
+                        RememberType::Everything => {}
+                    }
+                    Ok(
+                        Cow::from(format!("Context: {}", serde_json::to_string(&ret).unwrap()))
+                            .into(),
+                    )
+                }
+            }
+            FtlActions::RememberShipInfo(event) => {
+                if !self.actions.valid(&event) {
+                    Err(Cow::from("can't remember ship context at the moment").into())
+                } else {
+                    let gui = app.gui().unwrap();
+                    let mgr = gui.ship_manager().unwrap();
+                    let desc = match event.ship {
+                        TargetShip::Player => Some(ship_manager_desc(mgr, Some(&gui.equip_screen))),
+                        TargetShip::Enemy => {
+                            mgr.current_target().map(|x| ship_manager_desc(x, None))
+                        }
+                    };
+                    if let Some(mut desc) = desc {
+                        let actions::RememberShipInfo {
+                            ship,
+                            include_reactor_info,
+                            room_ids,
+                            door_ids,
+                            system_names,
+                            crew_member_names,
+                            weapon_names,
+                            drone_names,
+                            augment_names,
+                        } = event;
+                        if !include_reactor_info {
+                            desc.reactor = None;
+                        }
+                        if let Some(room_ids) = room_ids {
+                            if !room_ids.is_empty() {
+                                desc.rooms.retain(|x| room_ids.contains(&x.room_id));
+                            }
+                        } else {
+                            desc.rooms.clear();
+                        }
+                        if let Some(door_ids) = door_ids {
+                            if !door_ids.is_empty() {
+                                desc.doors.retain(|x| door_ids.contains(&x.door_id));
+                            }
+                        } else {
+                            desc.doors.clear();
+                        }
+                        if let Some(system_names) = system_names {
+                            if !system_names.is_empty() {
+                                desc.systems
+                                    .retain(|x| system_names.contains(x.system_name.as_ref()));
+                            }
+                        } else {
+                            desc.systems.clear();
+                        }
+                        if let Some(crew_member_names) = crew_member_names {
+                            if !crew_member_names.is_empty() {
+                                desc.crew
+                                    .retain(|x| crew_member_names.contains(&x.crew_member_name));
+                            }
+                        } else {
+                            desc.crew.clear();
+                        }
+                        if let Some(weapon_names) = weapon_names {
+                            if !weapon_names.is_empty() {
+                                desc.weapons.retain(|x| {
+                                    x.contents
+                                        .as_ref()
+                                        .is_some_and(|x| weapon_names.contains(&x.weapon_name))
+                                });
+                            }
+                        } else {
+                            desc.weapons.clear();
+                        }
+                        if let Some(drone_names) = drone_names {
+                            if !drone_names.is_empty() {
+                                desc.drones.retain(|x| {
+                                    x.contents
+                                        .as_ref()
+                                        .is_some_and(|x| drone_names.contains(&x.drone_name))
+                                });
+                            }
+                        } else {
+                            desc.drones.clear();
+                        }
+                        if let Some(augment_names) = augment_names {
+                            if !augment_names.is_empty() {
+                                desc.augments.retain(|x| {
+                                    x.contents
+                                        .as_ref()
+                                        .is_some_and(|x| augment_names.contains(&x.augment_name))
+                                });
+                            }
+                        } else {
+                            desc.augments.clear();
+                        }
+                        let mut ret = context::Context::default();
+                        match ship {
+                            actions::TargetShip::Player => ret.player_ship = Some(desc),
+                            actions::TargetShip::Enemy => ret.enemy_ship = Some(desc),
+                        }
+                        Ok(Cow::from(format!(
+                            "The ship info you've requested: {}",
+                            serde_json::to_string(&ret).unwrap()
+                        ))
+                        .into())
+                    } else {
+                        Err(Cow::from("the ship you've requested doesn't exist").into())
+                    }
+                }
+            }
         };
         if let Some(force) = &mut self.actions.force {
             if ret.is_ok() {
@@ -5615,6 +5782,215 @@ fn sectors(s: &bindings::StarMap) -> Vec<context::SectorInfo> {
     secs
 }
 
+fn inventory(gui: &bindings::CommandGui) -> context::Inventory {
+    let mgr = gui.ship_manager().unwrap();
+    context::Inventory {
+        drone_part_count: context::Help::new(text("tooltip_droneCount"), mgr.drone_count()),
+        fuel_count: context::Help::new(text("tooltip_fuelCount"), mgr.fuel_count),
+        missile_count: context::Help::new(text("tooltip_missileCount"), mgr.missile_count()),
+        scrap_count: context::Help::new(text("tooltip_scrapCount"), mgr.current_scrap),
+        overcapacity_slot: context::ItemSlot {
+            r#type: context::InventorySlotType::OverCapacity,
+            index: 0,
+            contents: gui
+                .equip_screen
+                .b_over_capacity
+                .then(|| {
+                    unsafe { xc(gui.equip_screen.overcapacity_box) }.and_then(|b| {
+                        #[allow(clippy::manual_map)]
+                        if let Some(x) = b.item.weapon() {
+                            Some(context::AnyItemInfo::Weapon(weapon_desc(
+                                x,
+                                &mut IdMap::new(),
+                            )))
+                        } else if let Some(x) = b.item.drone() {
+                            Some(context::AnyItemInfo::Drone(drone_desc(
+                                x,
+                                &mut IdMap::new(),
+                            )))
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .flatten(),
+        },
+        augment_overcapacity_slot: context::ItemSlot {
+            r#type: context::InventorySlotType::AugmentationOverCapacity,
+            index: 0,
+            contents: gui
+                .equip_screen
+                .b_over_aug_capacity
+                .then(|| {
+                    unsafe { xc(gui.equip_screen.over_aug_box) }.and_then(|b| {
+                        b.base
+                            .item
+                            .augment()
+                            .map(|x| augment_bp_desc(x, &mut IdMap::new()))
+                    })
+                })
+                .flatten(),
+        },
+        cargo_slots: gui
+            .equip_screen
+            .boxes::<bindings::EquipmentBox>()
+            .into_iter()
+            .enumerate()
+            .map(|(i, b)| context::ItemSlot {
+                r#type: context::InventorySlotType::Cargo,
+                index: i,
+                contents: unsafe { xc(b) }.and_then(|b| {
+                    #[allow(clippy::manual_map)]
+                    if let Some(x) = b.item.weapon() {
+                        Some(context::AnyItemInfo::Weapon(weapon_desc(
+                            x,
+                            &mut IdMap::new(),
+                        )))
+                    } else if let Some(x) = b.item.drone() {
+                        Some(context::AnyItemInfo::Drone(drone_desc(
+                            x,
+                            &mut IdMap::new(),
+                        )))
+                    } else {
+                        None
+                    }
+                }),
+            })
+            .collect(),
+    }
+}
+
+fn store_page(app: &bindings::CApp, force: bool) -> Option<context::StoreItems> {
+    let gui = app.gui().unwrap();
+    (gui.store_screens.base.b_open || force)
+        .then(|| {
+            let store = app.world()?.base_location_event()?.store()?;
+            (store.base.b_open || force).then(|| {
+                let cnt = store.section_count;
+                let start = (if store.b_show_page2 && !force { 2 } else { 0 }).min(cnt);
+                let end = if force { cnt } else { (start + 2).min(cnt) };
+                let mut page = context::StoreItems::default();
+                for i in ((start * 3)..(end * 3)).chain((end * 3)..store.v_store_boxes.len() as i32)
+                {
+                    let t = if i < end * 3 {
+                        bindings::StoreType::from_id(store.types[i as usize / 3])
+                    } else if i >= store.section_count * 3 + 3 {
+                        bindings::StoreType::None
+                    } else {
+                        bindings::StoreType::Items
+                    };
+                    let b = store.v_store_boxes.get(i as usize).unwrap();
+                    match t {
+                        bindings::StoreType::Crew => {
+                            let b = unsafe { xc(b.cast::<bindings::CrewStoreBox>()).unwrap() };
+                            if b.base.count == 0 {
+                                continue;
+                            }
+                            page.crew.push(crew_bp_desc(
+                                b.blueprint(),
+                                &mut IdMap::new(),
+                                ShipId::Player,
+                            ));
+                        }
+                        bindings::StoreType::Weapons => {
+                            let b = unsafe { xc(b.cast::<bindings::WeaponStoreBox>()).unwrap() };
+                            if b.base.count == 0 {
+                                continue;
+                            }
+                            page.weapons.push(weapon_bp_desc(
+                                b.blueprint().unwrap(),
+                                &mut IdMap::new(),
+                                ShipId::Player,
+                            ));
+                        }
+                        bindings::StoreType::Drones => {
+                            let b = unsafe { xc(b.cast::<bindings::DroneStoreBox>()).unwrap() };
+                            if b.base.count == 0 {
+                                continue;
+                            }
+                            page.drones.push(drone_bp_desc(
+                                b.blueprint().unwrap(),
+                                &mut IdMap::new(),
+                                ShipId::Player,
+                            ));
+                        }
+                        bindings::StoreType::Systems => {
+                            let b = unsafe { xc(b.cast::<bindings::SystemStoreBox>()).unwrap() };
+                            if b.base.count == 0 {
+                                continue;
+                            }
+                            page.systems.push(system_bp_desc(
+                                b.blueprint().unwrap(),
+                                &mut IdMap::new(),
+                                ShipId::Player,
+                                b.drone_choice,
+                            ));
+                        }
+                        bindings::StoreType::Augments => {
+                            let b = unsafe { xc(b.cast::<bindings::AugmentStoreBox>()).unwrap() };
+                            if b.base.count == 0 {
+                                continue;
+                            }
+                            page.augments
+                                .push(augment_bp_desc(b.blueprint().unwrap(), &mut IdMap::new()));
+                        }
+                        bindings::StoreType::Items => {
+                            let b = unsafe { xc(b.cast::<bindings::ItemStoreBox>()).unwrap() };
+                            if b.base.count == 0 {
+                                continue;
+                            }
+                            page.items.push(item_bp_desc(b.blueprint().unwrap()));
+                        }
+                        bindings::StoreType::None => {
+                            let b = unsafe { xc(b.cast::<bindings::RepairStoreBox>()).unwrap() };
+                            if b.base.count == 0 {
+                                continue;
+                            }
+                            page.repair
+                                .push(repair_bp_desc(b.repair_all, b.base.desc.cost));
+                        }
+                        bindings::StoreType::Total => {}
+                    }
+                }
+                page
+            })
+        })
+        .flatten()
+}
+
+fn event_options(gui: &bindings::CommandGui) -> (Option<String>, Vec<String>) {
+    let c = &gui.choice_box;
+    c.base
+        .b_open
+        .then(|| {
+            (
+                Some(
+                    "Current event:\n".to_owned()
+                        + &c.main_text.to_str()
+                        + &resource_event_str(&c.rewards, gui.ship_manager().unwrap()),
+                ),
+                c.choices
+                    .iter()
+                    .enumerate()
+                    .map(|(i, choice)| {
+                        format!(
+                            "Event option {}{}\n\n{}{}",
+                            i + 1,
+                            match choice.type_ {
+                                1 => " (Requirements not met, cannot be chosen)",
+                                2 => " (Requirements met)",
+                                _ => " (No requirements)",
+                            },
+                            choice.text.to_str(),
+                            resource_event_str(&choice.rewards, gui.ship_manager().unwrap())
+                        )
+                    })
+                    .collect(),
+            )
+        })
+        .unwrap_or_default()
+}
+
 fn collect_context(app: &CApp) -> context::Context {
     if app.lang_chooser.base.b_open {
         return Default::default();
@@ -5717,34 +6093,7 @@ fn collect_context(app: &CApp) -> context::Context {
     {
         confirmation_message = gui.crew_screen.delete_dialog.text.to_str().into_owned();
     }
-    let mut event_text = None;
-    let mut event_options = vec![];
-    if gui.choice_box.base.b_open {
-        let c = &gui.choice_box;
-        event_text = Some(
-            "Current event:\n".to_owned()
-                + &c.main_text.to_str()
-                + &resource_event_str(&c.rewards, gui.ship_manager().unwrap()),
-        );
-        event_options = c
-            .choices
-            .iter()
-            .enumerate()
-            .map(|(i, choice)| {
-                format!(
-                    "Event option {}{}\n\n{}{}",
-                    i + 1,
-                    match choice.type_ {
-                        1 => " (Requirements not met, cannot be chosen)",
-                        2 => " (Requirements met)",
-                        _ => " (No requirements)",
-                    },
-                    choice.text.to_str(),
-                    resource_event_str(&choice.rewards, gui.ship_manager().unwrap())
-                )
-            })
-            .collect();
-    }
+    let (event_text, event_options) = event_options(gui);
     let mgr = gui.ship_manager().unwrap();
     context::Context {
         confirmation_message,
@@ -5778,192 +6127,10 @@ fn collect_context(app: &CApp) -> context::Context {
         victory: None,
         event_text,
         event_options,
-        current_store_page: gui
-            .store_screens
-            .base
-            .b_open
-            .then(|| {
-                let store = app
-                    .world()
-                    .unwrap()
-                    .base_location_event()
-                    .unwrap()
-                    .store()
-                    .unwrap();
-                store.base.b_open.then(|| {
-                    let cnt = store.section_count;
-                    let start = (if store.b_show_page2 { 2 } else { 0 }).min(cnt);
-                    let end = (start + 2).min(cnt);
-                    let mut page = context::StoreItems::default();
-                    for i in
-                        ((start * 3)..(end * 3)).chain((end * 3)..store.v_store_boxes.len() as i32)
-                    {
-                        let t = if i < end * 3 {
-                            bindings::StoreType::from_id(store.types[i as usize / 3])
-                        } else if i >= store.section_count * 3 + 3 {
-                            bindings::StoreType::None
-                        } else {
-                            bindings::StoreType::Items
-                        };
-                        let b = store.v_store_boxes.get(i as usize).unwrap();
-                        match t {
-                            bindings::StoreType::Crew => {
-                                let b = unsafe { xc(b.cast::<bindings::CrewStoreBox>()).unwrap() };
-                                if b.base.count == 0 {
-                                    continue;
-                                }
-                                page.crew.push(crew_bp_desc(
-                                    b.blueprint(),
-                                    &mut IdMap::new(),
-                                    ShipId::Player,
-                                ));
-                            }
-                            bindings::StoreType::Weapons => {
-                                let b =
-                                    unsafe { xc(b.cast::<bindings::WeaponStoreBox>()).unwrap() };
-                                if b.base.count == 0 {
-                                    continue;
-                                }
-                                page.weapons.push(weapon_bp_desc(
-                                    b.blueprint().unwrap(),
-                                    &mut IdMap::new(),
-                                    ShipId::Player,
-                                ));
-                            }
-                            bindings::StoreType::Drones => {
-                                let b = unsafe { xc(b.cast::<bindings::DroneStoreBox>()).unwrap() };
-                                if b.base.count == 0 {
-                                    continue;
-                                }
-                                page.drones.push(drone_bp_desc(
-                                    b.blueprint().unwrap(),
-                                    &mut IdMap::new(),
-                                    ShipId::Player,
-                                ));
-                            }
-                            bindings::StoreType::Systems => {
-                                let b =
-                                    unsafe { xc(b.cast::<bindings::SystemStoreBox>()).unwrap() };
-                                if b.base.count == 0 {
-                                    continue;
-                                }
-                                page.systems.push(system_bp_desc(
-                                    b.blueprint().unwrap(),
-                                    &mut IdMap::new(),
-                                    ShipId::Player,
-                                    b.drone_choice,
-                                ));
-                            }
-                            bindings::StoreType::Augments => {
-                                let b =
-                                    unsafe { xc(b.cast::<bindings::AugmentStoreBox>()).unwrap() };
-                                if b.base.count == 0 {
-                                    continue;
-                                }
-                                page.augments.push(augment_bp_desc(
-                                    b.blueprint().unwrap(),
-                                    &mut IdMap::new(),
-                                ));
-                            }
-                            bindings::StoreType::Items => {
-                                let b = unsafe { xc(b.cast::<bindings::ItemStoreBox>()).unwrap() };
-                                if b.base.count == 0 {
-                                    continue;
-                                }
-                                page.items.push(item_bp_desc(b.blueprint().unwrap()));
-                            }
-                            bindings::StoreType::None => {
-                                let b =
-                                    unsafe { xc(b.cast::<bindings::RepairStoreBox>()).unwrap() };
-                                if b.base.count == 0 {
-                                    continue;
-                                }
-                                page.repair
-                                    .push(repair_bp_desc(b.repair_all, b.base.desc.cost));
-                            }
-                            bindings::StoreType::Total => {}
-                        }
-                    }
-                    page
-                })
-            })
-            .flatten(),
+        current_store_page: store_page(app, false),
         player_ship: Some(ship_manager_desc(mgr, Some(&gui.equip_screen))),
         enemy_ship: mgr.current_target().map(|x| ship_manager_desc(x, None)),
-        inventory: Some(context::Inventory {
-            drone_part_count: context::Help::new(text("tooltip_droneCount"), mgr.drone_count()),
-            fuel_count: context::Help::new(text("tooltip_fuelCount"), mgr.fuel_count),
-            missile_count: context::Help::new(text("tooltip_missileCount"), mgr.missile_count()),
-            scrap_count: context::Help::new(text("tooltip_scrapCount"), mgr.current_scrap),
-            overcapacity_slot: context::ItemSlot {
-                r#type: context::InventorySlotType::OverCapacity,
-                index: 0,
-                contents: gui
-                    .equip_screen
-                    .b_over_capacity
-                    .then(|| {
-                        unsafe { xc(gui.equip_screen.overcapacity_box) }.and_then(|b| {
-                            #[allow(clippy::manual_map)]
-                            if let Some(x) = b.item.weapon() {
-                                Some(context::AnyItemInfo::Weapon(weapon_desc(
-                                    x,
-                                    &mut IdMap::new(),
-                                )))
-                            } else if let Some(x) = b.item.drone() {
-                                Some(context::AnyItemInfo::Drone(drone_desc(
-                                    x,
-                                    &mut IdMap::new(),
-                                )))
-                            } else {
-                                None
-                            }
-                        })
-                    })
-                    .flatten(),
-            },
-            augment_overcapacity_slot: context::ItemSlot {
-                r#type: context::InventorySlotType::AugmentationOverCapacity,
-                index: 0,
-                contents: gui
-                    .equip_screen
-                    .b_over_aug_capacity
-                    .then(|| {
-                        unsafe { xc(gui.equip_screen.over_aug_box) }.and_then(|b| {
-                            b.base
-                                .item
-                                .augment()
-                                .map(|x| augment_bp_desc(x, &mut IdMap::new()))
-                        })
-                    })
-                    .flatten(),
-            },
-            cargo_slots: gui
-                .equip_screen
-                .boxes::<bindings::EquipmentBox>()
-                .into_iter()
-                .enumerate()
-                .map(|(i, b)| context::ItemSlot {
-                    r#type: context::InventorySlotType::Cargo,
-                    index: i,
-                    contents: unsafe { xc(b) }.and_then(|b| {
-                        #[allow(clippy::manual_map)]
-                        if let Some(x) = b.item.weapon() {
-                            Some(context::AnyItemInfo::Weapon(weapon_desc(
-                                x,
-                                &mut IdMap::new(),
-                            )))
-                        } else if let Some(x) = b.item.drone() {
-                            Some(context::AnyItemInfo::Drone(drone_desc(
-                                x,
-                                &mut IdMap::new(),
-                            )))
-                        } else {
-                            None
-                        }
-                    }),
-                })
-                .collect(),
-        }),
+        inventory: Some(inventory(gui)),
     }
 }
 

@@ -49,7 +49,7 @@ pub enum Opt3<T, Y> {
     Y(Y),
 }
 
-impl<'a, T: Clone, Y: Clone> Clone for Opt3<T, Y> {
+impl<T: Clone, Y: Clone> Clone for Opt3<T, Y> {
     fn clone(&self) -> Self {
         match self {
             Self::None => Self::None,
@@ -59,7 +59,7 @@ impl<'a, T: Clone, Y: Clone> Clone for Opt3<T, Y> {
     }
 }
 
-impl<'a, T: std::fmt::Debug, Y: std::fmt::Debug> std::fmt::Debug for Opt3<T, Y> {
+impl<T: std::fmt::Debug, Y: std::fmt::Debug> std::fmt::Debug for Opt3<T, Y> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::None => f.write_str("Opt3::None"),
@@ -69,7 +69,7 @@ impl<'a, T: std::fmt::Debug, Y: std::fmt::Debug> std::fmt::Debug for Opt3<T, Y> 
     }
 }
 
-impl<'a, T: Serialize, Y: Serialize> Serialize for Opt3<T, Y> {
+impl<T: Serialize, Y: Serialize> Serialize for Opt3<T, Y> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
