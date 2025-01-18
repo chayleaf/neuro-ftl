@@ -415,6 +415,11 @@ macro_rules! impl_quantized {
                 self
             }
         }
+        impl<const X: $ty> IsZero for $name<X> {
+            fn is_zero(&self) -> bool {
+                self.0 == 0
+            }
+        }
 
         impl<const X: $ty> From<$ty> for $name<X> {
             fn from(x: $ty) -> Self {

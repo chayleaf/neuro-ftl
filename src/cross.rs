@@ -5,26 +5,26 @@ use retour::GenericDetour;
 #[macro_export]
 macro_rules! cross_fn {
     {
-        $vis:vis unsafe fn $name:ident($($arg:ident : $ty:ty $(,)?)?) $body:block
+        $vis:vis unsafe fn $name:ident($($arg:ident : $ty:ty $(,)?)?) $(-> $ret:ty)? $body:block
     } => {
         #[cfg(target_os = "linux")]
-        $vis unsafe extern "C" fn $name($($arg: $ty)?) {
+        $vis unsafe extern "C" fn $name($($arg: $ty)?) $(-> $ret)? {
             $body
         }
         #[cfg(target_os = "windows")]
-        $vis unsafe extern "fastcall" fn $name($($arg: $ty)?) {
+        $vis unsafe extern "fastcall" fn $name($($arg: $ty)?) $(-> $ret)? {
             $body
         }
     };
     {
-        $vis:vis unsafe fn $name:ident($arg0:ident : $ty0:ty $(, $arg:ident : $ty:ty)+ $(,)?) $body:block
+        $vis:vis unsafe fn $name:ident($arg0:ident : $ty0:ty $(, $arg:ident : $ty:ty)+ $(,)?) $(-> $ret:ty)? $body:block
     } => {
         #[cfg(target_os = "linux")]
-        $vis unsafe extern "C" fn $name($arg0: $ty0, $($arg: $ty),+) {
+        $vis unsafe extern "C" fn $name($arg0: $ty0, $($arg: $ty),+) $(-> $ret)? {
             $body
         }
         #[cfg(target_os = "windows")]
-        $vis unsafe extern "fastcall" fn $name($arg0: $ty0, _: std::ffi::c_int, $($arg: $ty),+) {
+        $vis unsafe extern "fastcall" fn $name($arg0: $ty0, _: std::ffi::c_int, $($arg: $ty),+) $(-> $ret)? {
             $body
         }
     };

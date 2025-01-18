@@ -5072,11 +5072,13 @@ pub struct VtableCollideable {
         Option<fn(*mut Collideable, Pointf, Pointf, Damage, bool) -> CollisionResponse>,
     pub damage_beam: Option<fn(*mut Collideable, Pointf, Pointf, Damage) -> bool>,
     pub damage_area: Option<fn(*mut Collideable, Pointf, Damage, bool) -> bool>,
+    // 5
     pub damage_shield: Option<fn(*mut Collideable, Pointf, Damage, bool) -> bool>,
     pub get_dodged: Option<fn(*mut Collideable) -> bool>,
     pub get_super_shield: Option<fn(*mut Collideable) -> Pointf>,
     pub set_temp_vision: Option<fn(*mut Collideable, Pointf)>,
     pub get_space_id: Option<fn(*mut Collideable) -> c_int>,
+    // 10
     pub get_self_id: Option<fn(*mut Collideable) -> c_int>,
     pub get_owner_id: Option<fn(*mut Collideable) -> c_int>,
     pub valid_target_location: Option<fn(*mut Collideable, Pointf) -> bool>,
@@ -5332,15 +5334,23 @@ pub struct IonDrone {
     pub last_room: c_int,
 }
 
+#[repr(i32)]
+#[derive(Copy, Clone, Debug)]
+pub enum CollisionType {
+    None = 0,
+    Solid = 1,
+    Shield = 2,
+    Dodge = 3,
+}
+
 #[repr(C)]
 #[derive(Debug, TestOffsets)]
 pub struct CollisionResponse {
-    // 1: hit (but don't damage anymore), 2: shield, 3: miss
-    // 0: proper hit (caller should also do some damage)
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
     pub collision_type: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x4)]
     pub point: Pointf,
+    // i think damage/super_damage is for shield response
     #[cfg_attr(target_pointer_width = "64", test_offset = 0xc)]
     pub damage: c_int,
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x10)]
@@ -5564,6 +5574,7 @@ pub struct SuperShieldDrone {
 #[vtable]
 pub struct VtableProjectile {
     pub base: VtableCollideable,
+    // 13
     pub set_weapon_animation: Option<fn(*mut Projectile, *mut WeaponAnimation)>,
     pub on_render_specific: Option<fn(*mut Projectile, c_int)>,
     pub collision_check: Option<fn(*mut Projectile, *mut Collideable)>,
@@ -5571,6 +5582,7 @@ pub struct VtableProjectile {
     pub get_world_center_point: Option<fn(*mut Projectile) -> Pointf>,
     pub get_random_targeting_point: Option<fn(*mut Projectile, bool) -> Pointf>,
     pub compute_heading: Option<fn(*mut Projectile)>,
+    // 20
     pub set_destination_space: Option<fn(*mut Projectile, c_int)>,
     pub enter_destination_space: Option<fn(*mut Projectile)>,
     pub dead: Option<fn(*mut Projectile) -> bool>,
@@ -5654,6 +5666,126 @@ impl Projectile {
     pub fn vtable(&self) -> &'static VtableProjectile {
         unsafe { xb(self.vtable).unwrap() }
     }
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct Missile {
+    pub base: Projectile,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct BeamWeapon {
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
+    pub base: Projectile,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x268)]
+    pub sub_end: Pointf,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x270)]
+    pub sub_start: Pointf,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x278)]
+    pub shield_end: Pointf,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x280)]
+    pub final_end: Pointf,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x288)]
+    pub target2: Pointf,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x290)]
+    pub target1: Pointf,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x298)]
+    pub lifespan: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x29c)]
+    pub length: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x2a0)]
+    pub dh: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x2a4)]
+    pub last_collision: CollisionResponse,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x2b8)]
+    pub sound_channel: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x2c0)]
+    pub contact_animations: Vector<Animation>,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x2d8)]
+    pub animation_timer: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x2dc)]
+    pub last_damage: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x2e0)]
+    pub moving_target: *mut Targetable,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x2e8)]
+    pub start_heading: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x2ec)]
+    pub timer: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x2f0)]
+    pub weap_animation: *mut WeaponAnimation,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x2f8)]
+    pub pierced_shield: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x2f9)]
+    pub one_space: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x2fa)]
+    pub b_damage_super_shield: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x2fc)]
+    pub moving_target_id: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x300)]
+    pub checked_collision: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x308)]
+    pub smoke_anims: Vector<Animation>,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x320)]
+    pub last_smoke_anim: Pointf,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct LaserBlast {
+    pub base: Projectile,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x268)]
+    pub moving_target: *mut Targetable,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x270)]
+    pub spin_angle: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x274)]
+    pub spin_speed: c_float,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct PDSFire {
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
+    pub base: LaserBlast,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x278)]
+    pub start_point: Pointf,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x280)]
+    pub passed_target: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x284)]
+    pub current_scale: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x288)]
+    pub missed: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x290)]
+    pub explosion_animation: Animation,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct Asteroid {
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
+    pub base: Projectile,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x268)]
+    pub image_id: *mut GL_Texture,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x270)]
+    pub angle: c_float,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct BombProjectile {
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
+    pub public: Projectile,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x268)]
+    pub b_missed: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x270)]
+    pub miss_message: *mut DamageMessage,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x278)]
+    pub explosive_delay: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x27c)]
+    pub b_super_shield: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x27d)]
+    pub super_shield_bypass: bool,
 }
 
 #[repr(C)]
@@ -9182,7 +9314,7 @@ pub struct BoostPower {
 }
 
 #[repr(C)]
-#[derive(Debug, TestOffsets)]
+#[derive(Copy, Clone, Debug, TestOffsets)]
 pub struct Damage {
     #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
     pub i_damage: c_int,

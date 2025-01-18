@@ -7,8 +7,9 @@ use std::{
 };
 
 use bindings::{
-    AchievementTracker, CApp, CrewMember, Door, Drone, ProjectileFactory, ScoreKeeper,
-    SettingValues, ShipBuilder, ShipManager, TabbedWindow,
+    AchievementTracker, CApp, Collideable, CollisionResponse, CrewMember, Damage, Door, Drone,
+    Pointf, Projectile, ProjectileFactory, ScoreKeeper, SettingValues, ShipBuilder, ShipManager,
+    SpaceDrone, TabbedWindow, WeaponBlueprint,
 };
 use ctor::ctor;
 use game::{activated, deactivate};
@@ -302,15 +303,186 @@ unsafe fn hook(base: *mut c_void) {
 
     static mut GEN_INPUT_EVENTS: cross::Hook1<0x402AA0, 0x41C490, *mut CApp, ()> =
         cross::Hook1::new();
-
     cross_fn! {
         unsafe fn gen_input_events_hook(app: *mut CApp) {
             GEN_INPUT_EVENTS.call(app);
             game::loop_hook(app);
         }
     }
-
     GEN_INPUT_EVENTS.init(base, gen_input_events_hook);
+
+    static mut PROJECTILE_INIT: cross::Hook2<
+        0x45A430,
+        0x448F10,
+        *mut Projectile,
+        *const WeaponBlueprint,
+        (),
+    > = cross::Hook2::new();
+    cross_fn! {
+        unsafe fn projectile_init_hook(proj: *mut Projectile, bp: *const WeaponBlueprint) {
+            PROJECTILE_INIT.call(proj, bp);
+            game::projectile_post_init(proj, bp);
+        }
+    }
+    PROJECTILE_INIT.init(base, projectile_init_hook);
+
+    macro_rules! hook_proj_dtors {
+        ($(($a:expr, $b:expr, $c:expr, $d:expr),)+) => {
+            $({
+                static mut PROJECTILE_DTOR: cross::Hook1<
+                    $a,
+                    $c,
+                    *mut Projectile,
+                    (),
+                > = cross::Hook1::new();
+                cross_fn! {
+                    unsafe fn projectile_dtor_hook(proj: *mut Projectile) {
+                        game::projectile_pre_dtor(proj);
+                        PROJECTILE_DTOR.call(proj);
+                    }
+                }
+                PROJECTILE_DTOR.init(base, projectile_dtor_hook);
+                static mut PROJECTILE_DTOR2: cross::Hook1<
+                    $b,
+                    $d,
+                    *mut Projectile,
+                    (),
+                > = cross::Hook1::new();
+                cross_fn! {
+                    unsafe fn projectile_dtor_hook2(proj: *mut Projectile) {
+                        let proj1 = proj.byte_sub(std::mem::offset_of!(Projectile, base1));
+                        game::projectile_pre_dtor(proj1);
+                        PROJECTILE_DTOR2.call(proj);
+                    }
+                }
+                PROJECTILE_DTOR2.init(base, projectile_dtor_hook2);
+            })+
+        };
+    }
+    hook_proj_dtors!(
+        // format: windows, windows+8, linux, linux+8
+        // Projectile
+        (0x7562A0, 0x85D550, 0x44C1C0, 0x44C6D0),
+        (0x755FF0, 0x85D290, 0x44CC00, 0x44D120),
+        // BeamWeapon
+        (0x7543E0, 0x85C6D0, 0x431220, 0x431CB0),
+        (0x753DF0, 0x85C0E0, 0x430770, 0x431210),
+        // BombProjectile
+        (0x450D90, 0x4507E0, 0x433C20, 0x434160),
+        (0x450AB0, 0x450510, 0x434170, 0x4346C0),
+        // Missile
+        (0x76AC60, 0x85DAC0, 0x4453C0, 0x4458D0),
+        (0x76A9B0, 0x85D800, 0x4458E0, 0x445E00),
+        // LaserBlast
+        (0x755BE0, 0x85CF70, 0x44C6E0, 0x44CBF0),
+        (0x755930, 0x85CCB0, 0x44E5D0, 0x44EAF0),
+        // Asteroid
+        (0x76B9C0, 0x85E7B0, 0x44D130, 0x44D640),
+        (0x76B710, 0x85E4F0, 0x44DB70, 0x44E090),
+        // CrewLaser
+        (0x7764A0, 0x85ED10, 0x44D650, 0x44DB60),
+        (0x7761F0, 0x85EA50, 0x44E0A0, 0x44E5C0),
+        // PDSFire
+        (0x76B340, 0x85E130, 0x44F240, 0x44F960),
+        (0x76AF70, 0x85DD60, 0x44EB00, 0x44F230),
+    );
+
+    {
+        static mut SHIP_MGR_COLL: cross::Hook5<
+            0x4A5250,
+            0x4BFE80,
+            *mut ShipManager,
+            Pointf,
+            Pointf,
+            Damage,
+            bool,
+            CollisionResponse,
+        > = cross::Hook5::new();
+        cross_fn! {
+            unsafe fn ship_mgr_coll_hook(this: *mut ShipManager, start: Pointf, finish: Pointf, damage: Damage, raytrace: bool) -> CollisionResponse {
+                let ret = SHIP_MGR_COLL.call(this, start, finish, damage, raytrace);
+                game::ship_mgr_post_coll(this, start, finish, damage, raytrace, &ret);
+                ret
+            }
+        }
+        SHIP_MGR_COLL.init(base, ship_mgr_coll_hook);
+    }
+    {
+        static mut DRONE_COLL: cross::Hook5<
+            0x420C90,
+            0x462610,
+            *mut SpaceDrone,
+            Pointf,
+            Pointf,
+            Damage,
+            bool,
+            CollisionResponse,
+        > = cross::Hook5::new();
+        cross_fn! {
+            unsafe fn drone_coll_hook(this: *mut SpaceDrone, start: Pointf, finish: Pointf, damage: Damage, raytrace: bool) -> CollisionResponse {
+                let ret = DRONE_COLL.call(this, start, finish, damage, raytrace);
+                game::drone_post_coll(this, start, finish, damage, raytrace, &ret);
+                ret
+            }
+        }
+        DRONE_COLL.init(base, drone_coll_hook);
+    }
+
+    macro_rules! hook_proj_collchk {
+        ($(($a:expr, $b:expr),)+) => {
+            $({
+                static mut PROJECTILE_COLLCHK: cross::Hook2<
+                    $a,
+                    $b,
+                    *mut Projectile,
+                    *mut Collideable,
+                    (),
+                > = cross::Hook2::new();
+                cross_fn! {
+                    unsafe fn projectile_collchk_hook(proj: *mut Projectile, obj: *mut Collideable) {
+                        game::projectile_pre_collchk(proj, obj);
+                        PROJECTILE_COLLCHK.call(proj, obj);
+                        game::projectile_post_collchk(proj, obj);
+                    }
+                }
+                PROJECTILE_COLLCHK.init(base, projectile_collchk_hook);
+            })+
+        };
+    }
+    hook_proj_collchk!(
+        // Projectile
+        (0x459550, 0x446D80),
+        // BeamWeapon
+        (0x438C30, 0x42F340),
+        // BombProjectile
+        (0x450080, 0x4335E0),
+        // PDSFire
+        (0x456EA0, 0x446730),
+    );
+    // sun: 4A4E80/4C0C70
+    // pulsar: 4A36B0/4BD750
+    {
+        static mut SUN_DAMAGE: cross::Hook1<0x4A4E80, 0x4C0C70, *mut ShipManager, ()> =
+            cross::Hook1::new();
+        cross_fn! {
+            unsafe fn sundmg_hook(mgr: *mut ShipManager) {
+                game::sun_damage(mgr);
+                SUN_DAMAGE.call(mgr);
+                game::sun_damage(mgr);
+            }
+        }
+        SUN_DAMAGE.init(base, sundmg_hook);
+        static mut PULSAR_DAMAGE: cross::Hook1<0x4A36B0, 0x4BD750, *mut ShipManager, ()> =
+            cross::Hook1::new();
+        cross_fn! {
+            unsafe fn pulsardmg_hook(mgr: *mut ShipManager) {
+                game::pulsar_damage(mgr);
+                PULSAR_DAMAGE.call(mgr);
+                game::pulsar_damage(mgr);
+            }
+        }
+        PULSAR_DAMAGE.init(base, pulsardmg_hook);
+    }
 }
 
 #[cfg_attr(target_os = "linux", ctor)]

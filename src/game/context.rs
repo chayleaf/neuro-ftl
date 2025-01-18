@@ -36,7 +36,7 @@ pub struct WeaponInfo {
     pub cost: i32,
     #[serde(skip_serializing_if = "is_zero")]
     pub rarity: i32,
-    #[delta2]
+    // #[delta2]
     pub faction: ShipId,
     #[serde(skip_serializing_if = "is_zero")]
     pub damage: i32,
@@ -76,7 +76,7 @@ pub struct WeaponInfo {
     #[serde(skip_serializing_if = "is_zero")]
     pub cooldown: i32,
     #[serde(skip_serializing_if = "is_zero")]
-    pub remaining_cooldown: i32,
+    pub remaining_cooldown: QuantizedI32<3>,
     #[serde(skip_serializing_if = "is_zero")]
     pub required_power: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -107,7 +107,7 @@ pub struct DroneInfo {
     pub cost: i32,
     #[serde(skip_serializing_if = "is_zero")]
     pub rarity: i32,
-    #[delta2]
+    // #[delta2]
     pub faction: ShipId,
     #[serde(skip_serializing_if = "is_zero")]
     pub required_power: i32,
@@ -210,15 +210,15 @@ pub struct SystemInfo {
     #[delta1]
     pub system_name: Cow<'static, str>,
     pub description: Cow<'static, str>,
-    #[delta2]
+    // #[delta2]
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[delta(skip_serializing_if = "Option::is_none")]
+    // #[delta(skip_serializing_if = "Option::is_none")]
     pub tooltip: Option<&'static str>,
     #[serde(skip_serializing_if = "is_zero")]
     pub cost: i32,
     #[serde(skip_serializing_if = "is_zero")]
     pub rarity: i32,
-    #[delta2]
+    // #[delta2]
     pub faction: ShipId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub room_id: Option<u32>,
@@ -228,6 +228,8 @@ pub struct SystemInfo {
     pub can_be_manned: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_manned_bonus: Option<Cow<'static, str>>,
+    #[delta2]
+    pub requires_power: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub power: Option<Pair<i32>>,
     pub levels: Vec<SystemLevel>,
@@ -329,7 +331,7 @@ pub struct DoorInfoShort {
 #[derive(Clone, Debug, Delta, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RoomInfo {
-    #[delta2]
+    // #[delta2]
     pub faction: ShipId,
     #[delta1]
     pub room_id: u32,
@@ -492,8 +494,9 @@ pub struct CrewInfo {
 #[serde(rename_all = "camelCase")]
 pub struct ShipInfo {
     #[delta1]
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub ship_name: String,
-    #[delta2]
+    // #[delta2]
     pub faction: ShipId,
     #[serde(skip_serializing_if = "is_zero")]
     pub destroyed: bool,

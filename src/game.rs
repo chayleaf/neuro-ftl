@@ -22,7 +22,7 @@ use strings::text;
 use tokio::sync::mpsc;
 
 use crate::{
-    bindings::{self, power_manager, xb, xc, xm, CApp, Door, System},
+    bindings::{self, power_manager, xb, xc, xm, CApp, Door, Projectile, System},
     xml::DroneType,
 };
 
@@ -47,6 +47,13 @@ struct State {
     actions: ActionDb,
     buffer: Option<context::Context>,
     tips: HashMap<Cow<'static, str>, Instant>,
+    projectiles: HashMap<*mut Projectile, String>,
+    ship_hits_q: Vec<(i32, Option<String>, bool)>,
+    drone_hits_q: Vec<(*mut bindings::SpaceDrone, Option<String>, bool)>,
+    pulsar_q: Vec<i32>,
+    sun_q: Vec<i32>,
+    projectile_stack: Vec<*mut Projectile>,
+    shot_q: Vec<(i32, String)>,
 }
 
 unsafe impl Sync for State {}
@@ -4874,7 +4881,7 @@ fn weapon_bp_desc<'a>(
         can_target_own_ship: weapon.can_target_self(),
         projectile_speed: weapon.speed as i32,
         cooldown: weapon.cooldown as i32,
-        remaining_cooldown: 0,
+        remaining_cooldown: 0.into(),
         required_power: weapon.power,
         activated: None,
         hacked: false,
@@ -4925,7 +4932,7 @@ fn weapon_desc<'a>(
         can_target_own_ship: bp.can_target_self(),
         projectile_speed: bp.speed as i32,
         cooldown: weapon.cooldown.second as i32,
-        remaining_cooldown: weapon.cooldown.first as i32,
+        remaining_cooldown: ((weapon.cooldown.second - weapon.cooldown.first) as i32).into(),
         required_power: weapon.required_power(),
         activated: Some(weapon.powered),
         hacked: weapon.i_hack_level > 1,
@@ -5275,6 +5282,7 @@ fn system_desc(
             )
         }),
         stale_info: false,
+        requires_power: system.b_needs_power,
     }
 }
 
@@ -5298,6 +5306,10 @@ fn system_bp_desc<'a>(
         can_be_manned: None,
         current_manned_bonus: None,
         power: None,
+        requires_power: !matches!(
+            sys,
+            System::Pilot | System::Sensors | System::Doors | System::Battery
+        ),
         level: context::Pair {
             current: system.start_power,
             max: system.max_power,
@@ -5556,7 +5568,14 @@ fn ship_manager_desc(
         destroyed: mgr.b_destroyed,
         hull: Help::new(text("tooltip_hull"), mgr.ship.hull_integrity.into()),
         evasion_chance_percentage: mgr.dodge_factor(),
-        ship_name: mgr.my_blueprint.name.to_str().into_owned(),
+        ship_name: {
+            let name = mgr.my_blueprint.name.to_str();
+            if name == "should not be seen" {
+                String::new()
+            } else {
+                name.into_owned()
+            }
+        },
         reactor: reactor_state(mgr.i_ship_id, sensors, old_context),
         faction: if mgr.i_ship_id == 0 {
             ShipId::Player
@@ -6178,16 +6197,124 @@ fn event_options(gui: &bindings::CommandGui) -> (Option<String>, Vec<String>) {
 
 fn collect_context(
     app: &CApp,
-    old_context: Option<&context::Context>,
-) -> (Vec<Cow<'static, str>>, context::Context) {
+    game: &mut State,
+) -> (
+    Vec<Cow<'static, str>>,
+    Vec<Cow<'static, str>>,
+    context::Context,
+) {
+    let mut events = Vec::new();
+    for (ship, weapon) in game.shot_q.drain(..) {
+        if ship == 0 {
+            events.push(format!("A player weapon {weapon:?} has fired a shot").into());
+        } else {
+            events.push(format!("An enemy weapon {weapon:?} has fired a shot").into());
+        }
+    }
+    for ship in game.sun_q.drain(..) {
+        if ship == 0 {
+            events.push("The player ship has been hit by sun".into());
+        } else {
+            events.push("The enemy ship has been hit by sun".into());
+        }
+    }
+    for ship in game.pulsar_q.drain(..) {
+        if ship == 0 {
+            events.push("The player ship has been hit by the pulsar's ion pulse".into());
+        } else {
+            events.push("The enemy ship has been hit by the pulsar's ion pulse".into());
+        }
+    }
+    for (ship, weapon, hit) in game.ship_hits_q.drain(..) {
+        if let Some(weapon) = weapon {
+            if hit {
+                if ship == 0 {
+                    events.push(
+                        format!("The player ship has been hit by an enemy weapon {weapon:?}")
+                            .into(),
+                    );
+                } else {
+                    events.push(
+                        format!("The enemy ship has been hit by a player weapon {weapon:?}").into(),
+                    );
+                }
+            } else if ship == 0 {
+                events.push(
+                    format!("A shot from the enemy weapon {weapon:?} has missed the player ship")
+                        .into(),
+                );
+            } else {
+                events.push(
+                    format!("A shot from the player weapon {weapon:?} has missed the player ship")
+                        .into(),
+                );
+            }
+        } else if hit {
+            if ship == 0 {
+                events.push("The player ship has been hit by an asteroid".into());
+            } else {
+                events.push("The enemy ship has been hit by an asteroid".into());
+            }
+        } else if ship == 0 {
+            events.push("An asteroid has missed the player ship".into());
+        } else {
+            events.push("An asteroid has missed the enemy ship".into());
+        }
+    }
+    for (pdrone, weapon, hit) in game.drone_hits_q.drain(..) {
+        let Some(gui) = app.gui() else {
+            break;
+        };
+        let Some(mgr) = gui.ship_manager() else {
+            break;
+        };
+        for mgr in [mgr].into_iter().chain(mgr.current_target()) {
+            let Some(sys) = mgr.drone_system() else {
+                continue;
+            };
+            let mut map = IdMap::new();
+            for drone1 in sys.drones.iter() {
+                let drone = unsafe { xc(*drone1).unwrap() };
+                let name = map.map(drone.blueprint().unwrap().desc.title.to_str());
+                if *drone1 != pdrone.cast() {
+                    continue;
+                }
+                let ship = drone.i_ship_id;
+                let drone = name;
+                if hit {
+                    if ship == 0 {
+                        events.push(
+                            format!("A player drone {drone:?} has been hit by an enemy weapon {weapon:?}")
+                                .into(),
+                        );
+                    } else {
+                        events.push(
+                            format!("An enemy drone {drone:?} has been hit by a player weapon {weapon:?}").into(),
+                        );
+                    }
+                } else if ship == 0 {
+                    events.push(
+                            format!("A shot from an enemy weapon {weapon:?} has missed a player drone {drone:?}")
+                                .into(),
+                        );
+                } else {
+                    events.push(
+                            format!("A shot from a player weapon {weapon:?} has missed an enemy drone {drone:?}")
+                                .into(),
+                        );
+                }
+                break;
+            }
+        }
+    }
     let mut tips = Vec::new();
     if app.lang_chooser.base.b_open {
         tips.push("Please wait for human intervention".into());
-        return (tips, Default::default());
+        return (events, tips, Default::default());
     }
     if !app.game_logic {
         tips.push("Please wait for the game to load".into());
-        return (tips, Default::default());
+        return (events, tips, Default::default());
     }
     let sensors = app
         .gui()
@@ -6201,6 +6328,7 @@ fn collect_context(
                 "Credits are currently playing, you can skip them or wait for them to end".into(),
             );
             return (
+                events,
                 tips,
                 context::Context {
                     in_credits: true,
@@ -6213,6 +6341,7 @@ fn collect_context(
             let s = b.ship_manager().unwrap();
             tips.push("You are in ship selection. First, if you have any other unlocked ships, you may select a ship via `select_ship` action. After that, you may customize your ship using `rename_ship` and `rename_crew` actions. Finally, use the `start_game` action to start the game".into());
             return (
+                events,
                 tips,
                 context::Context {
                     available_ships: app
@@ -6261,7 +6390,8 @@ fn collect_context(
                     player_ship: Some(context::ShipInfo {
                         ship_name: app.menu.ship_builder.current_name.to_str().into_owned(),
                         ..{
-                            let mut desc = ship_manager_desc(s, None, sensors, old_context);
+                            let mut desc =
+                                ship_manager_desc(s, None, sensors, game.buffer.as_ref());
                             desc.doors.clear();
                             desc
                         }
@@ -6274,6 +6404,7 @@ fn collect_context(
         if app.menu.b_select_save {
             tips.push("Your action is awaiting confirmation".into());
             return (
+                events,
                 tips,
                 context::Context {
                     in_main_menu: true,
@@ -6289,6 +6420,7 @@ fn collect_context(
             tips.push("You are currently in the main menu. Please use the `new_game` action to start a new game".into());
         }
         return (
+            events,
             tips,
             context::Context {
                 in_main_menu: true,
@@ -6310,6 +6442,7 @@ fn collect_context(
             );
         }
         return (
+            events,
             tips,
             context::Context {
                 game_over: gui.game_over_screen.gameover_text.to_str().into_owned(),
@@ -6369,10 +6502,11 @@ fn collect_context(
             mgr,
             Some(&gui.equip_screen),
             sensors,
-            old_context,
+            game.buffer.as_ref(),
         )),
-        enemy_ship: mgr.current_target().filter(|x| x.hostile_ship).map(|x| {
-            let mut desc = ship_manager_desc(x, None, sensors, old_context);
+        // hide non-hostile ships
+        enemy_ship: mgr.current_target().filter(|x| x.base1.hostile).map(|x| {
+            let mut desc = ship_manager_desc(x, None, sensors, game.buffer.as_ref());
             // doors for the enemy ship are kinda useless
             desc.doors.clear();
             for room in &mut desc.rooms {
@@ -6386,7 +6520,10 @@ fn collect_context(
     if gui.star_map().is_some_and(|x| x.base.b_open) {
         let s = gui.star_map().unwrap();
         if s.b_choosing_new_sector {
-            tips.push("You are currently in sector selection. Friendly sectors have more stores, while hostile sectors have more enemies. Nebula sectors have lots of nebulae, and abandoned sectors are just plain dangerous. Use the `choose_next_sector` action".into());
+            tips.push(format!(
+                "You are currently in sector selection the current sector is {}/8 (sector 8 has a boss fight). Friendly sectors have more stores, while hostile sectors have more enemies. Nebula sectors have lots of nebulae, and abandoned sectors are just plain dangerous. Use the `choose_next_sector` action",
+                s.world_level + 1,
+            ).into());
         } else if mgr.fuel_count == 0 {
             tips.push("You don't currently have any fuel. Use the `skip_turn` action to skip your jump turn".into());
         } else if s.boss_level {
@@ -6445,16 +6582,16 @@ fn collect_context(
         }
         if let Some(space) = unsafe { xc(gui.space_status.space) } {
             if space.asteroid_generator.b_running {
-                tips.push("You are in an asteroid field, all ships will be constantly bombarded with asteroids until you leave the system with the `star_map` action".into());
+                tips.push("You are in an asteroid field, all ships will be constantly bombarded with asteroids until you leave the system with the `star_map` action, strong shields are recommended".into());
             }
             if space.sun_level && space.flash_timer.curr_goal - space.flash_timer.curr_time < 10.0 {
-                tips.push("A solar flare is about to occur and possibly start a fire".into());
+                tips.push("A solar flare is about to occur and possibly start a fire, solar flares will continue until you leave the system with the `star_map` action".into());
             }
             if space.pulsar_level
                 && space.flash_timer.curr_goal - space.flash_timer.curr_time < 10.0
             {
                 tips.push(
-                    "An ion pulse is about to occur and possibly disable some systems".into(),
+                    "An ion pulse is about to occur and possibly disable some systems, ion pulses will continue until you leave the system with the `star_map` action".into(),
                 );
             }
             if space.b_pds
@@ -6472,7 +6609,9 @@ fn collect_context(
             }
             if let Some(inc) = unsafe { xc(gui.space_status.incoming_fire) } {
                 if inc.tracker.running {
-                    tips.push("The boss ship is about to deploy drones".into());
+                    tips.push(
+                        "Power surge detected! The boss is about to use a special attack".into(),
+                    );
                 }
             }
             if !ship.weapons.iter().any(|x| {
@@ -6513,7 +6652,7 @@ fn collect_context(
             tips.push("Use the `star_map` action to move on from the current location".into());
         }
     }
-    (tips, ret)
+    (events, tips, ret)
 }
 
 // useful to hook: WarningMessage::Start or smth
@@ -6533,6 +6672,13 @@ pub fn loop_hook2(app: &mut CApp) {
                 actions: ActionDb::default(),
                 buffer: None,
                 tips: HashMap::new(),
+                drone_hits_q: vec![],
+                projectiles: HashMap::new(),
+                projectile_stack: vec![],
+                ship_hits_q: vec![],
+                pulsar_q: vec![],
+                sun_q: vec![],
+                shot_q: vec![],
             };
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -6643,8 +6789,15 @@ pub fn loop_hook2(app: &mut CApp) {
             log::error!("error starting up: {err}");
         }
     }
-    let (tips, ctx) = collect_context(app, game.buffer.as_ref());
+    let (events, tips, ctx) = collect_context(app, game);
 
+    fn format_events(events: Vec<Cow<'static, str>>) -> String {
+        if events.is_empty() {
+            String::new()
+        } else {
+            format!("Events: {}\n\n", events.join("; "))
+        }
+    }
     fn format_tips(
         mut tips: Vec<Cow<'static, str>>,
         old_tips: &mut HashMap<Cow<'static, str>, Instant>,
@@ -6671,7 +6824,8 @@ pub fn loop_hook2(app: &mut CApp) {
         if let Some(delta) = ctx.delta(&buf, &mut context::util::DeltaContext::default()) {
             if let Err(err) = game.context(
                 format!(
-                    "{}Game state changes (not the entire state). If you forgot something, use the `remind`/`remind_ship` actions: {}",
+                    "{}{}Game state changes (not the entire state). If you forgot something, use the `remind`/`remind_ship` actions: {}",
+                    format_events(events),
                     format_tips(tips, &mut old_tips),
                     serde_json::to_string(&delta).unwrap(),
                 ),
@@ -6679,10 +6833,22 @@ pub fn loop_hook2(app: &mut CApp) {
             ) {
                 log::error!("error sending context delta: {err}");
             }
+        } else if !events.is_empty() {
+            if let Err(err) = game.context(
+                format!(
+                    "{}{}",
+                    format_events(events),
+                    format_tips(tips, &mut old_tips),
+                ),
+                false,
+            ) {
+                log::error!("error sending events context: {err}");
+            }
         }
     } else if let Err(err) = game.context(
         format!(
-            "{}This is the current game state in JSON format. After this, you won't receive full state snapshots anymore, only the changed parts. If you forgot something, use the `remind` or `remind_ship` action to resend context about something: {}",
+            "{}{}This is the current game state in JSON format. After this, you won't receive full state snapshots anymore, only the changed parts. If you forgot something, use the `remind` or `remind_ship` action to resend context about something: {}",
+            format_events(events),
             format_tips(tips, &mut old_tips),
             serde_json::to_string(&ctx.serializable(&mut context::util::SerContext::default())).unwrap(),
         ),
@@ -6759,4 +6925,106 @@ pub unsafe fn loop_hook(app: *mut CApp) {
             deactivate();
         }
     }
+}
+
+pub unsafe fn projectile_post_init(this: *mut Projectile, weap: *const bindings::WeaponBlueprint) {
+    let Some(game) = GAME.get_mut() else {
+        return;
+    };
+    let weap = xb(weap).unwrap();
+    game.projectiles
+        .insert(this, weap.desc.title.to_str().into_owned());
+    let this = xc(this).unwrap();
+    game.shot_q
+        .push((this.owner_id, weap.desc.title.to_str().into_owned()));
+}
+
+pub unsafe fn projectile_pre_dtor(this: *mut Projectile) {
+    let Some(game) = GAME.get_mut() else {
+        return;
+    };
+    game.projectiles.remove(&this);
+}
+
+pub unsafe fn ship_mgr_post_coll(
+    this: *mut bindings::ShipManager,
+    _start: bindings::Pointf,
+    _finish: bindings::Pointf,
+    _damage: bindings::Damage,
+    _raytrace: bool,
+    res: &bindings::CollisionResponse,
+) {
+    if res.collision_type == bindings::CollisionType::None as i32 {
+        return;
+    }
+    let this = xc(this).unwrap();
+    let Some(game) = GAME.get_mut() else {
+        return;
+    };
+    let Some(proj) = game.projectile_stack.last() else {
+        log::warn!("projectile not found");
+        return;
+    };
+    game.ship_hits_q.push((
+        this.i_ship_id,
+        game.projectiles.get(proj).cloned(),
+        res.collision_type != bindings::CollisionType::Dodge as i32,
+    ));
+}
+
+pub unsafe fn drone_post_coll(
+    this: *mut bindings::SpaceDrone,
+    _start: bindings::Pointf,
+    _finish: bindings::Pointf,
+    _damage: bindings::Damage,
+    _raytrace: bool,
+    res: &bindings::CollisionResponse,
+) {
+    if res.collision_type == bindings::CollisionType::None as i32 {
+        return;
+    }
+    // let this = xc(this).unwrap();
+    let Some(game) = GAME.get_mut() else {
+        return;
+    };
+    let Some(proj) = game.projectile_stack.last() else {
+        log::warn!("projectile not found");
+        return;
+    };
+    game.drone_hits_q.push((
+        this,
+        game.projectiles.get(proj).cloned(),
+        res.collision_type != bindings::CollisionType::Dodge as i32,
+    ));
+}
+
+pub unsafe fn projectile_pre_collchk(this: *mut Projectile, _obj: *mut bindings::Collideable) {
+    let Some(game) = GAME.get_mut() else {
+        return;
+    };
+    game.projectile_stack.push(this);
+}
+pub unsafe fn projectile_post_collchk(_this: *mut Projectile, _obj: *mut bindings::Collideable) {
+    let Some(game) = GAME.get_mut() else {
+        return;
+    };
+    #[cfg(debug_assertions)]
+    assert_eq!(*game.projectile_stack.last().unwrap(), _this);
+    game.projectile_stack.pop();
+}
+
+pub unsafe fn sun_damage(this: *mut bindings::ShipManager) {
+    let Some(game) = GAME.get_mut() else {
+        return;
+    };
+    let this = xc(this).unwrap();
+    game.sun_q.push(this.i_ship_id);
+}
+
+pub unsafe fn pulsar_damage(this: *mut bindings::ShipManager) {
+    let Some(game) = GAME.get_mut() else {
+        return;
+    };
+    let this = xc(this).unwrap();
+    game.pulsar_q.push(this.i_ship_id);
 }
