@@ -3721,7 +3721,7 @@ fn available_actions(app: &CApp) -> ActionDb {
             ret.add::<actions::Sell>();
             ret.add::<actions::BuyScreen>();
         }
-        if store.base.b_open && store.section_count * 3 != store.v_store_boxes.len() as i32 {
+        if store.base.b_open && store.section_count * 3 + 5 == store.v_store_boxes.len() as i32 {
             if store.page2.base.b_active || store.page1.base.b_active {
                 ret.add::<actions::SwitchStorePage>();
             }
@@ -6070,7 +6070,7 @@ fn store_page(app: &bindings::CApp, force: bool) -> Option<context::StoreItems> 
         .then(|| {
             let store = app.world()?.base_location_event()?.store()?;
             ((store.base.b_open || force)
-                && store.section_count * 3 != store.v_store_boxes.len() as i32)
+                && store.section_count * 3 + 5 == store.v_store_boxes.len() as i32)
                 .then(|| {
                     let cnt = store.section_count;
                     let start = (if store.b_show_page2 && !force { 2 } else { 0 }).min(cnt);
@@ -6079,12 +6079,12 @@ fn store_page(app: &bindings::CApp, force: bool) -> Option<context::StoreItems> 
                     for i in
                         ((start * 3)..(end * 3)).chain((end * 3)..store.v_store_boxes.len() as i32)
                     {
-                        let t = if i < end * 3 {
-                            bindings::StoreType::from_id(store.types[i as usize / 3])
-                        } else if i >= store.section_count * 3 + 3 {
+                        let t = if i >= store.section_count * 4 {
                             bindings::StoreType::None
-                        } else {
+                        } else if i >= store.section_count * 3 {
                             bindings::StoreType::Items
+                        } else {
+                            bindings::StoreType::from_id(store.types[i as usize / 3])
                         };
                         let b = store.v_store_boxes.get(i as usize).unwrap();
                         match t {
@@ -6504,9 +6504,12 @@ fn collect_context(
             .unwrap_or_default(),
         selected_ship: None,
         victory: None,
+        current_store_page: event_text
+            .is_none()
+            .then(|| store_page(app, false))
+            .flatten(),
         event_text,
         event_options,
-        current_store_page: store_page(app, false),
         player_ship: Some(ship_manager_desc(
             mgr,
             Some(&gui.equip_screen),
