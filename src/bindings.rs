@@ -3852,24 +3852,35 @@ pub struct StarMap {
 
 impl StarMap {
     pub fn danger_progress_expectation(&self) -> f64 {
-        let mut total = 0;
-        let mut cnt = 0;
+        let mut counts = [0usize, 0];
         for loc in self.locations.iter() {
             let Some(loc) = (unsafe { xc(*loc) }) else {
                 continue;
             };
-            cnt += 1;
-            total += if loc.nebula {
+            if loc.danger_zone {
+                continue;
+            }
+            counts[usize::from(loc.nebula)] += 1;
+        }
+        if counts[0] + counts[1] == 0 {
+            return 0.0;
+        }
+        let avg = (counts[0] * 64 + counts[1] * if self.b_nebula_map { 51 } else { 32 }) as f64
+            / (counts[0] + counts[1]) as f64;
+        if let Some(cur) = self.current_loc() {
+            let cur = if cur.nebula {
                 if self.b_nebula_map {
-                    51
+                    51.0f64
                 } else {
-                    32
+                    32.0
                 }
             } else {
-                64
+                64.0
             };
+            cur.max(avg)
+        } else {
+            avg
         }
-        total as f64 / cnt as f64
     }
     pub fn fleet_time(&self, loc: &Location, exp: f64) -> f64 {
         if loc.danger_zone {
