@@ -3721,7 +3721,7 @@ fn available_actions(app: &CApp) -> ActionDb {
             ret.add::<actions::Sell>();
             ret.add::<actions::BuyScreen>();
         }
-        if store.base.b_open {
+        if store.base.b_open && store.section_count * 3 != store.v_store_boxes.len() as i32 {
             if store.page2.base.b_active || store.page1.base.b_active {
                 ret.add::<actions::SwitchStorePage>();
             }
@@ -6069,95 +6069,104 @@ fn store_page(app: &bindings::CApp, force: bool) -> Option<context::StoreItems> 
     (gui.store_screens.base.b_open || force)
         .then(|| {
             let store = app.world()?.base_location_event()?.store()?;
-            (store.base.b_open || force).then(|| {
-                let cnt = store.section_count;
-                let start = (if store.b_show_page2 && !force { 2 } else { 0 }).min(cnt);
-                let end = if force { cnt } else { (start + 2).min(cnt) };
-                let mut page = context::StoreItems::default();
-                for i in ((start * 3)..(end * 3)).chain((end * 3)..store.v_store_boxes.len() as i32)
-                {
-                    let t = if i < end * 3 {
-                        bindings::StoreType::from_id(store.types[i as usize / 3])
-                    } else if i >= store.section_count * 3 + 3 {
-                        bindings::StoreType::None
-                    } else {
-                        bindings::StoreType::Items
-                    };
-                    let b = store.v_store_boxes.get(i as usize).unwrap();
-                    match t {
-                        bindings::StoreType::Crew => {
-                            let b = unsafe { xc(b.cast::<bindings::CrewStoreBox>()).unwrap() };
-                            if b.base.count == 0 {
-                                continue;
+            ((store.base.b_open || force)
+                && store.section_count * 3 != store.v_store_boxes.len() as i32)
+                .then(|| {
+                    let cnt = store.section_count;
+                    let start = (if store.b_show_page2 && !force { 2 } else { 0 }).min(cnt);
+                    let end = if force { cnt } else { (start + 2).min(cnt) };
+                    let mut page = context::StoreItems::default();
+                    for i in
+                        ((start * 3)..(end * 3)).chain((end * 3)..store.v_store_boxes.len() as i32)
+                    {
+                        let t = if i < end * 3 {
+                            bindings::StoreType::from_id(store.types[i as usize / 3])
+                        } else if i >= store.section_count * 3 + 3 {
+                            bindings::StoreType::None
+                        } else {
+                            bindings::StoreType::Items
+                        };
+                        let b = store.v_store_boxes.get(i as usize).unwrap();
+                        match t {
+                            bindings::StoreType::Crew => {
+                                let b = unsafe { xc(b.cast::<bindings::CrewStoreBox>()).unwrap() };
+                                if b.base.count == 0 {
+                                    continue;
+                                }
+                                page.crew.push(crew_bp_desc(
+                                    b.blueprint(),
+                                    &mut IdMap::new(),
+                                    ShipId::Player,
+                                ));
                             }
-                            page.crew.push(crew_bp_desc(
-                                b.blueprint(),
-                                &mut IdMap::new(),
-                                ShipId::Player,
-                            ));
-                        }
-                        bindings::StoreType::Weapons => {
-                            let b = unsafe { xc(b.cast::<bindings::WeaponStoreBox>()).unwrap() };
-                            if b.base.count == 0 {
-                                continue;
+                            bindings::StoreType::Weapons => {
+                                let b =
+                                    unsafe { xc(b.cast::<bindings::WeaponStoreBox>()).unwrap() };
+                                if b.base.count == 0 {
+                                    continue;
+                                }
+                                page.weapons.push(weapon_bp_desc(
+                                    b.blueprint().unwrap(),
+                                    &mut IdMap::new(),
+                                    ShipId::Player,
+                                ));
                             }
-                            page.weapons.push(weapon_bp_desc(
-                                b.blueprint().unwrap(),
-                                &mut IdMap::new(),
-                                ShipId::Player,
-                            ));
-                        }
-                        bindings::StoreType::Drones => {
-                            let b = unsafe { xc(b.cast::<bindings::DroneStoreBox>()).unwrap() };
-                            if b.base.count == 0 {
-                                continue;
+                            bindings::StoreType::Drones => {
+                                let b = unsafe { xc(b.cast::<bindings::DroneStoreBox>()).unwrap() };
+                                if b.base.count == 0 {
+                                    continue;
+                                }
+                                page.drones.push(drone_bp_desc(
+                                    b.blueprint().unwrap(),
+                                    &mut IdMap::new(),
+                                    ShipId::Player,
+                                ));
                             }
-                            page.drones.push(drone_bp_desc(
-                                b.blueprint().unwrap(),
-                                &mut IdMap::new(),
-                                ShipId::Player,
-                            ));
-                        }
-                        bindings::StoreType::Systems => {
-                            let b = unsafe { xc(b.cast::<bindings::SystemStoreBox>()).unwrap() };
-                            if b.base.count == 0 {
-                                continue;
+                            bindings::StoreType::Systems => {
+                                let b =
+                                    unsafe { xc(b.cast::<bindings::SystemStoreBox>()).unwrap() };
+                                if b.base.count == 0 {
+                                    continue;
+                                }
+                                page.systems.push(system_bp_desc(
+                                    b.blueprint().unwrap(),
+                                    &mut IdMap::new(),
+                                    ShipId::Player,
+                                    b.drone_choice,
+                                ));
                             }
-                            page.systems.push(system_bp_desc(
-                                b.blueprint().unwrap(),
-                                &mut IdMap::new(),
-                                ShipId::Player,
-                                b.drone_choice,
-                            ));
-                        }
-                        bindings::StoreType::Augments => {
-                            let b = unsafe { xc(b.cast::<bindings::AugmentStoreBox>()).unwrap() };
-                            if b.base.count == 0 {
-                                continue;
+                            bindings::StoreType::Augments => {
+                                let b =
+                                    unsafe { xc(b.cast::<bindings::AugmentStoreBox>()).unwrap() };
+                                if b.base.count == 0 {
+                                    continue;
+                                }
+                                page.augments.push(augment_bp_desc(
+                                    b.blueprint().unwrap(),
+                                    &mut IdMap::new(),
+                                ));
                             }
-                            page.augments
-                                .push(augment_bp_desc(b.blueprint().unwrap(), &mut IdMap::new()));
-                        }
-                        bindings::StoreType::Items => {
-                            let b = unsafe { xc(b.cast::<bindings::ItemStoreBox>()).unwrap() };
-                            if b.base.count == 0 {
-                                continue;
+                            bindings::StoreType::Items => {
+                                let b = unsafe { xc(b.cast::<bindings::ItemStoreBox>()).unwrap() };
+                                if b.base.count == 0 {
+                                    continue;
+                                }
+                                page.items.push(item_bp_desc(b.blueprint().unwrap()));
                             }
-                            page.items.push(item_bp_desc(b.blueprint().unwrap()));
-                        }
-                        bindings::StoreType::None => {
-                            let b = unsafe { xc(b.cast::<bindings::RepairStoreBox>()).unwrap() };
-                            if b.base.count == 0 {
-                                continue;
+                            bindings::StoreType::None => {
+                                let b =
+                                    unsafe { xc(b.cast::<bindings::RepairStoreBox>()).unwrap() };
+                                if b.base.count == 0 {
+                                    continue;
+                                }
+                                page.repair
+                                    .push(repair_bp_desc(b.repair_all, b.base.desc.cost));
                             }
-                            page.repair
-                                .push(repair_bp_desc(b.repair_all, b.base.desc.cost));
+                            bindings::StoreType::Total => {}
                         }
-                        bindings::StoreType::Total => {}
                     }
-                }
-                page
-            })
+                    page
+                })
         })
         .flatten()
 }
