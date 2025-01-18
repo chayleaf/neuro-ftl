@@ -361,7 +361,7 @@ fn derive_delta2(input: TokenStream) -> TokenStream {
                 },
             });
             fields2.extend(quote! {
-                #attr
+                // #attr
                 #[serde(skip_serializing_if = "Option::is_none")]
                 #vis #ident: Option<<#ty as Serializable<'delta>>::Ser>,
             });
@@ -370,7 +370,7 @@ fn derive_delta2(input: TokenStream) -> TokenStream {
                 #ident: self.#ident.serializable(ctx),
             });
             fields2.extend(quote! {
-                #attr
+                // #attr
                 #attr3
                 #vis #ident: <#ty as Serializable<'delta>>::Ser,
             });

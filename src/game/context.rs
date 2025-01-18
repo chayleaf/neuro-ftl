@@ -76,6 +76,8 @@ pub struct WeaponInfo {
     #[serde(skip_serializing_if = "is_zero")]
     pub cooldown: i32,
     #[serde(skip_serializing_if = "is_zero")]
+    pub remaining_cooldown: i32,
+    #[serde(skip_serializing_if = "is_zero")]
     pub required_power: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub activated: Option<bool>,
@@ -177,7 +179,7 @@ pub struct RepairInfo {
 pub struct SystemLevel {
     #[delta2]
     #[serde(skip_serializing_if = "Option::is_none")]
-    // #[delta(skip_serializing_if = "Option::is_none")]
+    #[delta(skip_serializing_if = "Option::is_none")]
     pub effect: Option<Cow<'static, str>>,
     #[delta1]
     pub level: usize,
@@ -210,7 +212,7 @@ pub struct SystemInfo {
     pub description: Cow<'static, str>,
     #[delta2]
     #[serde(skip_serializing_if = "Option::is_none")]
-    // #[delta(skip_serializing_if = "Option::is_none")]
+    #[delta(skip_serializing_if = "Option::is_none")]
     pub tooltip: Option<&'static str>,
     #[serde(skip_serializing_if = "is_zero")]
     pub cost: i32,
@@ -236,15 +238,25 @@ pub struct SystemInfo {
     // get locked down normally
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on_cooldown: Option<bool>,
+    #[delta2]
     #[serde(skip_serializing_if = "is_zero")]
+    #[delta(skip_serializing_if = "is_zero")]
     pub hacked: bool,
+    #[delta2]
     #[serde(skip_serializing_if = "is_zero")]
+    #[delta(skip_serializing_if = "is_zero")]
     pub on_fire: bool,
+    #[delta2]
     #[serde(skip_serializing_if = "is_zero")]
+    #[delta(skip_serializing_if = "is_zero")]
     pub breached: bool,
+    #[delta2]
     #[serde(skip_serializing_if = "is_zero")]
+    #[delta(skip_serializing_if = "is_zero")]
     pub being_damaged: bool,
+    #[delta2]
     #[serde(skip_serializing_if = "is_zero")]
+    #[delta(skip_serializing_if = "is_zero")]
     pub being_repaired: bool,
     // for piloting
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -278,6 +290,12 @@ pub struct SystemInfo {
     pub artillery_weapon: Option<WeaponInfo>,
     #[serde(skip_serializing_if = "is_zero")]
     pub stale_info: bool,
+}
+
+impl<T: IsZero> IsZero for Option<T> {
+    fn is_zero(&self) -> bool {
+        !self.as_ref().is_some_and(|x| !x.is_zero())
+    }
 }
 
 #[derive(Clone, Debug, Delta, Eq, PartialEq, Default)]
@@ -319,18 +337,26 @@ pub struct RoomInfo {
     pub doors: Vec<DoorInfoShort>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub crew_member_names: Vec<String>,
+    #[delta2]
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[delta(skip_serializing_if = "Vec::is_empty")]
     pub intruder_names: Vec<String>,
     #[delta2]
     #[serde(skip_serializing_if = "Option::is_none")]
-    // #[delta(skip_serializing_if = "Option::is_none")]
+    #[delta(skip_serializing_if = "Option::is_none")]
     pub system_name: Option<String>,
+    #[delta2]
     #[serde(skip_serializing_if = "is_zero")]
+    #[delta(skip_serializing_if = "is_zero")]
     pub fire_level: i32,
+    #[delta2]
     #[serde(skip_serializing_if = "is_zero")]
+    #[delta(skip_serializing_if = "is_zero")]
     pub breached: bool,
     pub oxygen_percentage: QuantizedI32<25>,
+    #[delta2]
     #[serde(skip_serializing_if = "is_zero")]
+    #[delta(skip_serializing_if = "is_zero")]
     pub hacked: bool,
     #[serde(skip_serializing_if = "is_zero")]
     pub stale_info: bool,

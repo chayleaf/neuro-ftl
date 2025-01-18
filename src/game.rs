@@ -4874,6 +4874,7 @@ fn weapon_bp_desc<'a>(
         can_target_own_ship: weapon.can_target_self(),
         projectile_speed: weapon.speed as i32,
         cooldown: weapon.cooldown as i32,
+        remaining_cooldown: 0,
         required_power: weapon.power,
         activated: None,
         hacked: false,
@@ -4923,7 +4924,8 @@ fn weapon_desc<'a>(
         lockdowns_room: bp.damage.b_lockdown,
         can_target_own_ship: bp.can_target_self(),
         projectile_speed: bp.speed as i32,
-        cooldown: bp.cooldown as i32,
+        cooldown: weapon.cooldown.second as i32,
+        remaining_cooldown: weapon.cooldown.first as i32,
         required_power: weapon.required_power(),
         activated: Some(weapon.powered),
         hacked: weapon.i_hack_level > 1,
@@ -5848,27 +5850,37 @@ fn locations(s: &bindings::StarMap, eq: &bindings::Equipment) -> Vec<context::Lo
             nebula: Help::new(text("map_nebula_loc"), x.nebula && !s.b_nebula_map),
             asteroids: Help::new(
                 text("map_asteroid_loc"),
-                x.event().is_some_and(|x| x.environment == 1),
+                (x.known && scanners || s.b_map_revealed)
+                    && x.event().is_some_and(|x| x.environment == 1),
             ),
             sun: Help::new(
                 text("map_sun_loc"),
-                x.event().is_some_and(|x| x.environment == 2),
+                (x.known && scanners || s.b_map_revealed)
+                    && x.event().is_some_and(|x| x.environment == 2),
             ),
             ion: Help::new(
                 text("map_ion_loc"),
-                x.event().is_some_and(|x| x.environment == 4),
+                (x.known && scanners || s.b_map_revealed)
+                    && x.event().is_some_and(|x| x.environment == 4),
             ),
             pulsar: Help::new(
                 text("map_pulsar_loc"),
-                x.event().is_some_and(|x| x.environment == 5),
+                (x.known && scanners || s.b_map_revealed)
+                    && x.event().is_some_and(|x| x.environment == 5),
             ),
             planetary_defense_system: Help::new(
                 text("map_pds_loc"),
-                !x.boss && !x.danger_zone && x.event().is_some_and(|x| x.environment == 6),
+                (x.known && scanners || s.b_map_revealed)
+                    && !x.boss
+                    && !x.danger_zone
+                    && x.event().is_some_and(|x| x.environment == 6),
             ),
             planetary_defense_system_fleet: Help::new(
                 text("map_pds_fleet"),
-                !x.boss && x.danger_zone && x.event().is_some_and(|x| x.environment == 6),
+                (x.known && scanners || s.b_map_revealed)
+                    && !x.boss
+                    && x.danger_zone
+                    && x.event().is_some_and(|x| x.environment == 6),
             ),
         })
         .collect();
