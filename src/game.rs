@@ -5092,6 +5092,7 @@ impl<T: serde::Serialize + Ord + std::fmt::Debug + for<'a> Delta<'a>> From<bindi
 }
 
 fn system_desc(
+    mgr: &bindings::ShipManager,
     system: &bindings::ShipSystem,
     map: &mut IdMap<'static>,
     sensors: i32,
@@ -5195,6 +5196,13 @@ fn system_desc(
         } else {
             None
         },
+        jump_cooldown: if sys == System::Pilot {
+            (mgr.jump_timer.second - mgr.jump_timer.first) as i32
+        } else {
+            0
+        }
+        .into(),
+        jump_ready: sys == System::Pilot && mgr.jump_timer.first >= mgr.jump_timer.second,
         weapon_names: (sys == System::Weapons)
             .then(|| {
                 let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::WeaponSystem>() };
@@ -5323,6 +5331,8 @@ fn system_bp_desc<'a>(
         being_damaged: false,
         being_repaired: false,
         evasion_bonus: None,
+        jump_ready: false,
+        jump_cooldown: 0.into(),
         weapon_names: vec![],
         drone_names: (sys == System::Drones)
             .then(|| {
@@ -5710,7 +5720,7 @@ fn ship_manager_desc(
                 .filter_map(|x| {
                     let system = unsafe { xc(*x).unwrap() };
                     if mgr.i_ship_id == 0 || sensors >= 4 {
-                        Some(system_desc(system, map, sensors, old_context))
+                        Some(system_desc(mgr, system, map, sensors, old_context))
                     } else {
                         let sys = System::from_id(system.i_system_type).unwrap();
                         let bp = sys.blueprint().unwrap();
@@ -6366,6 +6376,10 @@ fn collect_context(
                                 if bp.name.to_str() == "should not be seen" {
                                     return None;
                                 }
+                                // don't show locked ships because that's simpler
+                                if !unlocked {
+                                    return None;
+                                }
                                 Some(context::ShipDesc {
                                     ship_name: bp.name.to_str().into_owned(), // bp.desc.title.to_str().into_owned(),
                                     class: bp.ship_class.to_str().into_owned(),
@@ -6474,6 +6488,7 @@ fn collect_context(
     }
     let (event_text, event_options) = event_options(gui);
     let mgr = gui.ship_manager().unwrap();
+    let has_confirm = !confirmation_message.is_empty();
     let ret = context::Context {
         confirmation_message,
         available_ships: vec![],
@@ -6533,13 +6548,13 @@ fn collect_context(
         let s = gui.star_map().unwrap();
         if s.b_choosing_new_sector {
             tips.push(format!(
-                "You are currently in sector selection the current sector is {}/8 (sector 8 has a boss fight). Friendly sectors have more stores, while hostile sectors have more enemies. Nebula sectors have lots of nebulae, and abandoned sectors are just plain dangerous. Use the `choose_next_sector` action",
+                "You are currently in sector selection, the current sector is {}/8 (sector 8 has a boss fight). Friendly sectors have more stores, while hostile sectors have more enemies. Nebula sectors have lots of nebulae, and abandoned sectors are just plain dangerous. Use the `choose_next_sector` action",
                 s.world_level + 1,
             ).into());
         } else if mgr.fuel_count == 0 {
             tips.push("You don't currently have any fuel. Use the `skip_turn` action to skip your jump turn".into());
         } else if s.boss_level {
-            tips.push("You are currently fighting the endgame boss. It jumps every 2 turns, and if it remains at the federation base for 3 consecutive turns, you automatically lose. The boss has 3 stages, it will jump away after each stage, but return to the federation base shortly after. Good luck! Use the `jump` action to progress, note the repair stations scattered around".into());
+            tips.push("You are currently fighting the endgame boss. It makes a jump every 2 turns (every 2 jumps you make), and if it remains at the federation base for 3 consecutive turns, you automatically lose. The boss has 3 stages, it will jump away after each stage, but return to the federation base shortly after. Good luck! Use the `jump` action to progress, note the repair stations scattered around".into());
             if s.arrived_at_base > 0 {
                 tips.push(
                     format!(
@@ -6554,7 +6569,10 @@ fn collect_context(
         } else {
             tips.push("You are currently in star selection. Generally, your goal is to pick a route to the exit beacon (marked with the \"exit\" flag) that's as long as possible, but still avoid encounters with the rebels' fleet".into());
         }
-    } else if !gui.choice_box.base.b_open {
+    } else if !gui.choice_box.base.b_open && !has_confirm {
+        if gui.b_paused {
+            tips.push("Use the `unpause` action when you are ready to continue".into());
+        }
         let mut bad = false;
         if ship.rooms.iter().any(|x| x.fire_level > 0) {
             tips.push("Some of your rooms are on fire! You may send crew members to fight fire, or you may vent oxygen by opening airlocks using the `plan_door_route` and `open_doors` actions".into());
@@ -6590,6 +6608,7 @@ fn collect_context(
         }
         if mgr.i_intruder_count > 0 {
             tips.push("There are intruders on your ship! You may move your crew to fight them with the `move_crew` action".into());
+            tips.push("You can use the `pause` action at any time to give yourself more time to think or talk to chat".into());
             bad = true;
         }
         if let Some(space) = unsafe { xc(gui.space_status.space) } {
@@ -6615,7 +6634,10 @@ fn collect_context(
         }
         tips.push("Use `increase_system_power` and `decrease_system_power` actions to distribute power across the ship".into());
         if ret.enemy_ship.is_some() {
-            tips.push("You are currently engaged in combat! You can use the `pause` action at any time to give yourself more time to think".into());
+            if !gui.b_paused {
+                tips.push("You are currently engaged in combat".into());
+                tips.push("You can use the `pause` action at any time to give yourself more time to think or talk to chat".into());
+            }
             if !bad {
                 tips.push("You should make the crew members man ship systems by moving them to system rooms with the `move_crew` actions. Manning bonuses depend on the system".into());
             }
@@ -6667,13 +6689,14 @@ fn collect_context(
     (events, tips, ret)
 }
 
-// useful to hook: WarningMessage::Start or smth
-// game_over.gameover_text, game_over.b_victory
-
 pub fn loop_hook2(app: &mut CApp) {
-    // activated with `l`, very useful for testing
     unsafe {
+        // activated with `l`, very useful for testing
         (*super::SETTINGS.0).command_console = true;
+        (*super::SETTINGS.0).opened_list = 2;
+        (*super::SETTINGS.0).beam_tutorial = false;
+        (*super::SETTINGS.0).b_show_changelog = false;
+        (*super::SETTINGS.0).b_show_sync_achievements = false;
         GAME.get_or_init(|| {
             let (game2ws_tx, mut game2ws_rx) = mpsc::channel(128);
             let (ws2game_tx, ws2game_rx) = mpsc::channel(128);
@@ -6817,7 +6840,7 @@ pub fn loop_hook2(app: &mut CApp) {
         let now = Instant::now();
         tips.retain(|tip| {
             if let Some(old) = old_tips.get(tip.as_ref()) {
-                if now - *old < TIP_TIMEOUT {
+                if now.duration_since(*old) < TIP_TIMEOUT {
                     return false;
                 }
             }

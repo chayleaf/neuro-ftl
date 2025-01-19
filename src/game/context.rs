@@ -263,6 +263,10 @@ pub struct SystemInfo {
     // for piloting
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evasion_bonus: Option<i32>,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub jump_cooldown: QuantizedI32<5>,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub jump_ready: bool,
     // for weapons
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub weapon_names: Vec<String>,

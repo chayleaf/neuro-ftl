@@ -9826,6 +9826,85 @@ pub struct AchievementTracker {
     pub current_ship: StdString,
 }
 
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct ArrowDescription {
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
+    pub location: Point,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x8)]
+    pub rotation: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0xc)]
+    pub upgrades_relative: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x10)]
+    pub hostile_relative: c_int,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct StateInfo {
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
+    pub state_continue_needed: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x8)]
+    pub state_text: TextString,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x18)]
+    pub arrows: Vector<ArrowDescription>,
+}
+
+#[repr(C)]
+#[derive(Debug, TestOffsets)]
+pub struct TutorialManager {
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x0)]
+    pub b_running: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x8)]
+    pub continue_button: TextButton,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x108)]
+    pub current_state: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x110)]
+    pub state_name: StdString,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x118)]
+    pub state_order: Vector<StdString>,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x130)]
+    pub state_values: Map<StdString, c_int>,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x160)]
+    pub states: Map<StdString, StateInfo>,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x190)]
+    pub player_ship: *mut ShipManager,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x198)]
+    pub gui: *mut CommandGui,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1a0)]
+    pub crew_control: *mut CrewControl,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1a8)]
+    pub star_map: *mut StarMap,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1b0)]
+    pub upgrade_screen: *mut Upgrades,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1b8)]
+    pub combat_control: *mut CombatControl,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1c0)]
+    pub system_control: *mut SystemControl,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1c8)]
+    pub ship_info: *mut TabbedWindow,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1d0)]
+    pub b_game_paused: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1d1)]
+    pub b_quit_tutorial: bool,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1d8)]
+    pub tracker: AnimationTracker,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x1f8)]
+    pub timer_open: c_float,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x200)]
+    pub desc_box: *mut WindowFrame,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x208)]
+    pub desc_box_height: c_int,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x210)]
+    pub arrow: *mut GL_Texture,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x218)]
+    pub arrow2: *mut GL_Texture,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x220)]
+    pub hand: HandAnimation,
+    #[cfg_attr(target_pointer_width = "64", test_offset = 0x248)]
+    pub b_trigger_event: bool,
+}
+
 pub const SHIP_BLUEPRINTS: [&str; 30] = [
     "PLAYER_SHIP_HARD",
     "PLAYER_SHIP_HARD_2",
