@@ -257,13 +257,13 @@ impl neuro_sama::game::GameMut for State {
                     if app.menu.b_open {
                         if app.menu.b_credit_screen {
                             app.menu.b_credit_screen = false;
-                            Ok(Cow::from("skipped credits").into())
+                            Ok(None)
                         } else {
                             Err(Cow::from("credits aren't playing").into())
                         }
                     } else if app.gui().unwrap().game_over_screen.b_showing_credits {
                         app.gui_mut().unwrap().game_over_screen.b_showing_credits = false;
-                        Ok(Cow::from("skipped credits").into())
+                        Ok(None)
                     } else {
                         Err(Cow::from("credits aren't playing").into())
                     }
@@ -286,7 +286,7 @@ impl neuro_sama::game::GameMut for State {
                             .vtable()
                             .on_l_button_down(ptr::addr_of_mut!(app.base), 0, 0)
                     };
-                    Ok(Cow::from("starting a new game").into())
+                    Ok(None)
                 } else {
                     Err(Cow::from("can't start a new game right now").into())
                 }
@@ -307,7 +307,7 @@ impl neuro_sama::game::GameMut for State {
                             .vtable()
                             .on_l_button_down(ptr::addr_of_mut!(app.base), 0, 0)
                     };
-                    Ok(Cow::from("continuing from existing save").into())
+                    Ok(None)
                 } else {
                     Err(Cow::from("can't continue from an existing save").into())
                 }
@@ -334,9 +334,12 @@ impl neuro_sama::game::GameMut for State {
                             .on_l_button_down(ptr::addr_of_mut!(app.base), 0, 0)
                     };
                     if confirm {
-                        Ok(Cow::from("starting a new game").into())
+                        Ok(None)
                     } else {
-                        Ok(Cow::from("not starting a new game").into())
+                        Ok(
+                            Cow::from("not starting a new game, please reselect a menu option")
+                                .into(),
+                        )
                     }
                 } else if !app.menu.b_open && app.gui().unwrap().leave_crew_dialog.base.b_open {
                     let window = &mut app.gui_mut().unwrap().leave_crew_dialog;
@@ -702,7 +705,7 @@ impl neuro_sama::game::GameMut for State {
                                 .vtable()
                                 .on_l_button_down(ptr::addr_of_mut!(app.base), 0, 0);
                         }
-                        Ok(Cow::from("successfully started the game").into())
+                        Ok(None)
                     } else {
                         Err(Cow::from("couldn't start the game, this is a bug in the mod").into())
                     }
@@ -730,7 +733,7 @@ impl neuro_sama::game::GameMut for State {
                             .vtable()
                             .on_key_down(ptr::addr_of_mut!(app.base), 27);
                     }*/
-                    Ok(Cow::from("entered the main menu").into())
+                    Ok(None)
                 } else {
                     Err(Cow::from("can't enter the main menu at this time").into())
                 }
@@ -1012,7 +1015,7 @@ impl neuro_sama::game::GameMut for State {
                                     }
                                     weapon.current_entry_angle =
                                         rand::thread_rng().gen_range(0..360) as f32;
-                                    Ok(Cow::from("successfully targeted the weapon").into())
+                                    Ok(None)
                                 }
                                 Err(err) => Err(err),
                             }
@@ -1137,7 +1140,7 @@ impl neuro_sama::game::GameMut for State {
                                     Err(Cow::from("failed to power the drone").into())
                                 }
                             } else if unsafe { ship_manager.depower_drone(b.p_drone, true) } {
-                                Ok(Cow::from("successfully depowered the drone").into())
+                                Ok(None)
                             } else {
                                 Err(Cow::from(
                                     "couldn't depower the drone, it's probably already depowered",
@@ -1249,12 +1252,12 @@ impl neuro_sama::game::GameMut for State {
                                 } else if unsafe {
                                     ship_manager.power_weapon(b.p_weapon, true, false)
                                 } {
-                                    Ok(Cow::from("successfully powered the weapon").into())
+                                    Ok(None)
                                 } else {
                                     Err(Cow::from("failed to power the weapon").into())
                                 }
                             } else if unsafe { ship_manager.depower_weapon(b.p_weapon, true) } {
-                                Ok(Cow::from("successfully depowered the weapon").into())
+                                Ok(None)
                             } else {
                                 Err(Cow::from(
                                     "couldn't depower the weapon, it's probably already depowered",
@@ -1350,7 +1353,7 @@ impl neuro_sama::game::GameMut for State {
                             } else {
                                 hack.queued_system = system;
                                 hack.b_armed = false;
-                                Ok(Cow::from("successfully launched a drone").into())
+                                Ok(Cow::from("successfully launched a hacking drone").into())
                             }
                         } else {
                             let systems = IdMap::with(|map| {
@@ -1467,7 +1470,7 @@ impl neuro_sama::game::GameMut for State {
                                     b.push(x);
                                 }
                                 mind.queued_crew = b;
-                                Ok(Cow::from("successfully activated mind control").into())
+                                Ok(None)
                             }
                         } else {
                             Err(Cow::from(format!(
@@ -1544,7 +1547,7 @@ impl neuro_sama::game::GameMut for State {
                                             .vtable()
                                             .mouse_click(ptr::addr_of_mut!(b.base.base), false);
                                     }
-                                    ret = Ok(Cow::from("successfully initiated hacking").into());
+                                    ret = Ok(None);
                                     break;
                                 }
                             }
@@ -1596,7 +1599,7 @@ impl neuro_sama::game::GameMut for State {
                                         .vtable()
                                         .mouse_click(ptr::addr_of_mut!(b.base.base), false);
                                 }
-                                ret = Ok(Cow::from("successfully started the battery").into());
+                                ret = Ok(None);
                                 break;
                             }
                         }
@@ -1649,7 +1652,7 @@ impl neuro_sama::game::GameMut for State {
                                         .unwrap()
                                         .b_turned_on
                                 );
-                                ret = Ok(Cow::from("successfully initiated cloaking").into());
+                                ret = Ok(None);
                                 break;
                             }
                         }
@@ -1788,9 +1791,11 @@ impl neuro_sama::game::GameMut for State {
                                     }
                                 }
                                 if hacked.is_empty() {
+                                    let mut cnt = 0;
                                     for door in doors {
                                         let door = unsafe { xm(door).unwrap() };
                                         if door.i_hacked <= 0 && door.b_open != open {
+                                            cnt += 1;
                                             if open {
                                                 door.open();
                                             } else {
@@ -1799,9 +1804,11 @@ impl neuro_sama::game::GameMut for State {
                                         }
                                     }
                                     if open {
-                                        Ok(Cow::from("successfully opened the doors").into())
+                                        Ok(Cow::from(format!("successfully opened {cnt} doors"))
+                                            .into())
                                     } else {
-                                        Ok(Cow::from("successfully closed the doors").into())
+                                        Ok(Cow::from(format!("successfully closed {cnt} doors"))
+                                            .into())
                                     }
                                 } else {
                                     Err(Cow::from(format!(
@@ -2096,7 +2103,11 @@ impl neuro_sama::game::GameMut for State {
                                 ))))
                             } else {
                                 unsafe { c.vtable().activate_power(c0) }
-                                Ok(Cow::from("successfully locked the room down").into())
+                                Ok(Cow::from(format!(
+                                    "successfully locked down the room {}",
+                                    c.i_room_id
+                                ))
+                                .into())
                             }
                         }
                         None => {
@@ -2287,7 +2298,7 @@ impl neuro_sama::game::GameMut for State {
                                             v2.add_item(s2, i1);
                                         }
                                     }
-                                    Ok(Cow::from("successfully swapped the slots").into())
+                                    Ok(None)
                                 }
                             }
                         }
@@ -2301,12 +2312,12 @@ impl neuro_sama::game::GameMut for State {
                     let gui = app.gui_mut().unwrap();
                     if gui.store_screens.base.b_open {
                         gui.store_screens.close();
-                        Ok(Cow::from("closed the store").into())
+                        Ok(None)
                     } else if gui.star_map().unwrap().base.b_open {
                         let star_map = gui.star_map_mut().unwrap();
                         if star_map.b_choosing_new_sector {
                             star_map.b_choosing_new_sector = false;
-                            Ok(Cow::from("closed next sector selection").into())
+                            Ok(None)
                         } else {
                             unsafe {
                                 star_map
@@ -2314,11 +2325,11 @@ impl neuro_sama::game::GameMut for State {
                                     .vtable()
                                     .close(ptr::addr_of_mut!(star_map.base));
                             }
-                            Ok(Cow::from("closed the starmap").into())
+                            Ok(None)
                         }
                     } else if gui.ship_screens.base.b_open {
                         gui.ship_screens.close();
-                        Ok(Cow::from("closed the ship overview").into())
+                        Ok(None)
                     } else {
                         Err(Cow::from("nothing to close").into())
                     }
@@ -2336,7 +2347,7 @@ impl neuro_sama::game::GameMut for State {
                         .into())
                     } else if !gui.upgrade_screen.base.b_open {
                         gui.ship_screens.open();
-                        Ok(Cow::from("successfully opened ship overview").into())
+                        Ok(Cow::from("successfully opened ship overview, here you can upgrade systems, rename or fire crew members, and manage your inventory").into())
                     } else {
                         Err(
                             Cow::from("can't open the ship overview because it's already open")
@@ -2375,7 +2386,14 @@ impl neuro_sama::game::GameMut for State {
                                     .vtable()
                                     .on_click(ptr::addr_of_mut!(btn.base.base));
                             }
-                            Ok(Cow::from("successfully updated the reactor").into())
+                            let power = power_manager(upgrades.ship_manager().unwrap().i_ship_id)
+                                .map(|x| {
+                                    x.current_power.second + upgrades.reactor_button.temp_upgrade
+                                })
+                                .unwrap_or_default();
+                            Ok(Cow::from(format!(
+                                "will upgrade the reactor to level {power} once you leave the upgrades screen",
+                            )).into())
                         }
                     } else {
                         let c = IdMap::with(|map| {
@@ -2622,7 +2640,7 @@ impl neuro_sama::game::GameMut for State {
                             unsafe {
                                 s.base.vtable().open(ptr::addr_of_mut!(s.base));
                             }
-                            Ok(Cow::from("opened the starmap").into())
+                            Ok(None)
                         }
                     }
                 }
@@ -2666,7 +2684,7 @@ impl neuro_sama::game::GameMut for State {
                     } else {
                         s.b_choosing_new_sector = true;
                         s.potential_sector_choice = -1;
-                        Ok(Cow::from("opened next sector selection").into())
+                        Ok(None)
                     }
                 }
             }
@@ -2698,7 +2716,7 @@ impl neuro_sama::game::GameMut for State {
                 } else {
                     let gui = app.gui_mut().unwrap();
                     gui.store_screens.open();
-                    Ok(Cow::from("successfully opened the store").into())
+                    Ok(Cow::from("successfully opened the store, you can buy and sell items here, note that sometimes stores have 2 pages of items to buy").into())
                 }
             }
             FtlActions::BuyScreen(event) => {
@@ -2710,7 +2728,7 @@ impl neuro_sama::game::GameMut for State {
                     unsafe {
                         store.set_tab(0);
                     }
-                    Ok(Cow::from("successfully opened the buy screen").into())
+                    Ok(None)
                 }
             }
             FtlActions::SellScreen(event) => {
@@ -2722,7 +2740,7 @@ impl neuro_sama::game::GameMut for State {
                     unsafe {
                         store.set_tab(1);
                     }
-                    Ok(Cow::from("successfully opened the sell screen").into())
+                    Ok(None)
                 }
             }
             FtlActions::SwitchStorePage(event) => {
@@ -2742,7 +2760,12 @@ impl neuro_sama::game::GameMut for State {
                     } else {
                         ptr::addr_of_mut!(store.page1)
                     };
-                    Ok(Cow::from("successfully switched the store page").into())
+                    Ok(Cow::from(if store.b_show_page2 {
+                        "switched the store page to page 2/2"
+                    } else {
+                        "switched the store page to page 1/2"
+                    })
+                    .into())
                 }
             }
             FtlActions::Sell(event) => {
@@ -2825,12 +2848,36 @@ impl neuro_sama::game::GameMut for State {
                                 .find(|(_, x)| **x == slot)
                                 .unwrap()
                                 .0 as i32;
+                            let cost = unsafe {
+                                xc(*e
+                                    .v_equipment_boxes
+                                    .get(e.dragging_equip_box as usize)
+                                    .unwrap())
+                            }
+                            .map(|x| {
+                                if let Some(weap) = x.item.weapon() {
+                                    weap.blueprint().unwrap().desc.cost
+                                } else if let Some(drone) = x.item.drone() {
+                                    drone.blueprint().unwrap().desc.cost
+                                } else if let Some(aug) = x.item.augment() {
+                                    aug.desc.cost
+                                } else if let Some(crew) = x.item.crew() {
+                                    crew.blueprint.desc.cost
+                                } else {
+                                    0
+                                }
+                            })
+                            .unwrap_or_default();
                             unsafe {
                                 e.base.vtable().mouse_up(ptr::addr_of_mut!(e.base), 0, 0);
                             }
                             e.b_dragging = false;
                             e.b_selling_item = false;
-                            Ok(Cow::from("successfully sold the item").into())
+                            Ok(Cow::from(format!(
+                                "successfully sold the item for {} scrap",
+                                cost / 2
+                            ))
+                            .into())
                         }
                     }
                 }
@@ -2994,7 +3041,7 @@ impl neuro_sama::game::GameMut for State {
                                 ))
                                 .into())
                             } else {
-                                Ok(Cow::from("successfully purchased the item").into())
+                                Ok(None)
                             }
                         } else {
                             Err(Cow::from("you don't have enough scrap for this purchase").into())
@@ -3010,7 +3057,7 @@ impl neuro_sama::game::GameMut for State {
                 } else {
                     let gui = app.gui_mut().unwrap();
                     gui.b_paused = true;
-                    Ok(Cow::from("successfully paused the game").into())
+                    Ok(None)
                 }
             }
             FtlActions::Unpause(event) => {
@@ -3019,7 +3066,7 @@ impl neuro_sama::game::GameMut for State {
                 } else {
                     let gui = app.gui_mut().unwrap();
                     gui.b_paused = false;
-                    Ok(Cow::from("successfully unpaused the game").into())
+                    Ok(None)
                 }
             }
             FtlActions::SystemsScreen(event) => {
@@ -3031,7 +3078,7 @@ impl neuro_sama::game::GameMut for State {
                     unsafe {
                         overview.set_tab(0);
                     }
-                    Ok(Cow::from("successfully opened the systems screen").into())
+                    Ok(None)
                 }
             }
             FtlActions::CrewScreen(event) => {
@@ -3043,7 +3090,7 @@ impl neuro_sama::game::GameMut for State {
                     unsafe {
                         overview.set_tab(1);
                     }
-                    Ok(Cow::from("successfully opened the crew screen").into())
+                    Ok(None)
                 }
             }
             FtlActions::InventoryScreen(event) => {
@@ -3055,7 +3102,7 @@ impl neuro_sama::game::GameMut for State {
                     unsafe {
                         overview.set_tab(2);
                     }
-                    Ok(Cow::from("successfully opened the inventory screen").into())
+                    Ok(None)
                 }
             }
             FtlActions::Remember(event) => {
@@ -3550,7 +3597,36 @@ fn available_actions(app: &CApp) -> ActionDb {
         return ret;
     }
     ret.add::<actions::Remember>();
-    ret.add::<actions::RememberShipInfo>();
+    {
+        let mut meta = meta::<actions::RememberShipInfo>();
+        let sch = meta.schema.as_object_mut().unwrap();
+        for prop in sch
+            .get_mut("properties")
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .values_mut()
+        {
+            let prop = prop.as_object_mut().unwrap();
+            let ty = prop.get_mut("type").unwrap();
+            let mut ty1 = serde_json::Value::Null;
+            std::mem::swap(&mut ty1, ty);
+            let mut remove_def = false;
+            *ty = match ty1 {
+                serde_json::Value::Array(x) => {
+                    remove_def = true;
+                    x.into_iter()
+                        .find(|x| x.as_str().unwrap() != "null")
+                        .unwrap()
+                }
+                x => x,
+            };
+            if remove_def {
+                prop.remove("default");
+            }
+        }
+        ret.actions.insert(actions::RememberShipInfo::name(), meta);
+    }
     if gui.leave_crew_dialog.base.b_open {
         if gui.leave_crew_dialog.yes_button.base.b_active {
             ret.add::<actions::Confirm>();
