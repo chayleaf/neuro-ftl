@@ -1,4 +1,7 @@
-use std::{borrow::Cow, collections::BTreeMap};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, VecDeque},
+};
 
 use neuro_ftl_derive::Delta;
 use serde::Serialize;
@@ -232,9 +235,11 @@ pub struct SystemInfo {
     pub requires_power: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub power: Option<Pair<i32>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub levels: Vec<SystemLevel>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active: Option<bool>,
+    #[serde(skip_serializing_if = "is_zero")]
     pub level: Pair<i32>,
     // Some(false) or Some(true) if this is e.g. cloaking, None if this is something that doesnt
     // get locked down normally
@@ -284,7 +289,7 @@ pub struct SystemInfo {
     #[serde(skip_serializing_if = "is_zero")]
     pub hacking_allowed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub hacking_drone_system: Option<&'static str>,
+    pub hacking_target_system: Option<&'static str>,
     // for battery
     #[serde(skip_serializing_if = "Option::is_none")]
     pub battery_power: Option<Pair<i32>>,
@@ -674,8 +679,10 @@ pub struct Context {
     pub confirmation_message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub event_text: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub event_options: Vec<String>,
+    // use vecdeque as a hack so it uses a different impl from vecs
+    // (it doesnt do deltas it just pushes out everything from scratch)
+    #[serde(skip_serializing_if = "VecDeque::is_empty")]
+    pub event_options: VecDeque<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub inventory: Option<Inventory>,
     #[serde(skip_serializing_if = "Option::is_none")]

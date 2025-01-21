@@ -2,7 +2,7 @@ use serde::Serialize;
 use std::{
     borrow::Cow,
     cmp::Ordering,
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashSet, VecDeque},
 };
 
 #[derive(Debug, Default)]
@@ -72,6 +72,20 @@ impl<'a> Delta<'a> for f32 {
 }
 
 impl<'a> Serializable<'a> for f32 {
+    type Ser = &'a Self;
+    fn serializable(&'a self, _ctx: &mut SerContext<'a>) -> Self::Ser {
+        self
+    }
+}
+
+impl<'a, T: 'a + PartialEq + Serialize> Delta<'a> for VecDeque<T> {
+    type Delta = &'a Self;
+    fn delta(&'a self, prev: &'a Self, _ctx: &mut DeltaContext<'a>) -> Option<Self::Delta> {
+        (self != prev).then_some(self)
+    }
+}
+
+impl<'a, T: 'a + Serialize> Serializable<'a> for VecDeque<T> {
     type Ser = &'a Self;
     fn serializable(&'a self, _ctx: &mut SerContext<'a>) -> Self::Ser {
         self

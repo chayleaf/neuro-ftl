@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, BinaryHeap, HashMap, HashSet},
+    collections::{BTreeMap, BinaryHeap, HashMap, HashSet, VecDeque},
     ffi::c_int,
     mem,
     ops::DerefMut,
@@ -49,13 +49,13 @@ struct State {
     actions: ActionDb,
     buffer: Option<context::Context>,
     tips: HashMap<Cow<'static, str>, Instant>,
-    projectiles: HashMap<*mut Projectile, String>,
     ship_hits_q: Vec<(i32, Option<String>, bool)>,
     drone_hits_q: Vec<(*mut bindings::SpaceDrone, Option<String>, bool)>,
     pulsar_q: Vec<i32>,
     sun_q: Vec<i32>,
     projectile_stack: Vec<*mut Projectile>,
-    shot_q: Vec<(i32, String)>,
+    projectiles: HashMap<*mut Projectile, String>,
+    shot_q: Vec<(i32, *mut Projectile, String)>,
 }
 
 unsafe impl Sync for State {}
@@ -5185,14 +5185,29 @@ fn system_desc(
         system.power_state.second,
     );
     let reactor = reactor_state(system.i_ship_id, sensors, old_context);
+    let crew_info = if system.i_ship_id == 0 {
+        true
+    } else {
+        sensors >= 2
+    };
+    let weapon_info = if system.i_ship_id == 0 {
+        true
+    } else {
+        sensors >= 3
+    };
+    let full_info = if system.i_ship_id == 0 {
+        true
+    } else {
+        sensors >= 4
+    };
     context::SystemInfo {
         faction: if system.i_ship_id == 0 {
             ShipId::Player
         } else {
             ShipId::Enemy
         },
-        cost: bp.cost as i32,
-        rarity: bp.rarity as i32,
+        cost: full_info.then_some(bp.cost as i32).unwrap_or_default(),
+        rarity: full_info.then_some(bp.rarity as i32).unwrap_or_default(),
         room_id: system.room_id.try_into().ok(),
         system_name: map.map(bp.title.to_str().into()),
         description: bp.desc.to_str().into(),
@@ -5201,8 +5216,8 @@ fn system_desc(
             current: system.health_state.first,
             max: system.health_state.second,
         }),
-        can_be_manned: Some(system.b_boostable),
-        current_manned_bonus: (system.i_active_manned > 0).then(|| match sys {
+        can_be_manned: crew_info.then_some(system.b_boostable),
+        current_manned_bonus: (crew_info && system.i_active_manned > 0).then(|| match sys {
             System::Shields => text("shield_skill")
                 .replace(
                     "\\1",
@@ -5240,40 +5255,53 @@ fn system_desc(
             System::Sensors | System::Doors => text("subsystem_manned").into(),
             _ => "".into(),
         }),
-        power: Some(context::Pair {
+        power: full_info.then(|| context::Pair {
             current: system.effective_power(),
             max: system.max_power(),
         }),
-        level: context::Pair {
-            current: system.power_state.second,
-            max: bp.max_power as i32,
-        },
-        levels,
-        active: Some(system.functioning()),
-        on_cooldown: match sys {
-            System::Battery
-            | System::Mind
-            | System::Clonebay
-            | System::Hacking
-            | System::Artillery
-            | System::Cloaking => Some(system.locked_prime()),
-            _ if system.locked_prime() => Some(true),
-            _ => None,
-        },
+        level: full_info
+            .then_some(context::Pair {
+                current: system.power_state.second,
+                max: bp.max_power as i32,
+            })
+            .unwrap_or_default(),
+        levels: full_info.then_some(levels).unwrap_or_default(),
+        active: crew_info.then(|| system.functioning()),
+        on_cooldown: crew_info
+            .then(|| match sys {
+                System::Battery
+                | System::Mind
+                | System::Clonebay
+                | System::Hacking
+                | System::Artillery
+                | System::Cloaking => Some(system.locked_prime()),
+                _ if system.locked_prime() => Some(true),
+                _ => None,
+            })
+            .flatten(),
         hacked: system.hacked(),
-        on_fire: system.b_on_fire,
-        breached: system.b_breached,
-        being_damaged: system.damaged_last_frame,
-        being_repaired: system.repaired_last_frame,
-        evasion_bonus: if sys == System::Engines {
-            let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::EngineSystem>() };
-            Some(system.dodge_factor())
-        } else if sys == System::Pilot {
-            let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::ShipSystem>() };
-            Some(bindings::CrewSkill::Piloting.bonus(system.manned_boost()) as i32)
-        } else {
-            None
-        },
+        on_fire: crew_info.then_some(system.b_on_fire).unwrap_or_default(),
+        breached: crew_info.then_some(system.b_breached).unwrap_or_default(),
+        being_damaged: crew_info
+            .then_some(system.damaged_last_frame)
+            .unwrap_or_default(),
+        being_repaired: crew_info
+            .then_some(system.repaired_last_frame)
+            .unwrap_or_default(),
+        evasion_bonus: full_info
+            .then(|| {
+                if sys == System::Engines {
+                    let system =
+                        unsafe { &*ptr::addr_of!(*system).cast::<bindings::EngineSystem>() };
+                    Some(system.dodge_factor())
+                } else if sys == System::Pilot {
+                    let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::ShipSystem>() };
+                    Some(bindings::CrewSkill::Piloting.bonus(system.manned_boost()) as i32)
+                } else {
+                    None
+                }
+            })
+            .flatten(),
         jump_cooldown: if sys == System::Pilot {
             (mgr.jump_timer.second - mgr.jump_timer.first) as i32
         } else {
@@ -5281,7 +5309,7 @@ fn system_desc(
         }
         .into(),
         jump_ready: sys == System::Pilot && mgr.jump_timer.first >= mgr.jump_timer.second,
-        weapon_names: (sys == System::Weapons)
+        weapon_names: (weapon_info && sys == System::Weapons)
             .then(|| {
                 let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::WeaponSystem>() };
                 system
@@ -5299,7 +5327,7 @@ fn system_desc(
                     .collect()
             })
             .unwrap_or_default(),
-        drone_names: (sys == System::Drones)
+        drone_names: (weapon_info && sys == System::Drones)
             .then(|| {
                 let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::DroneSystem>() };
                 system
@@ -5339,7 +5367,7 @@ fn system_desc(
                 system.drone.arrived
             })
             .unwrap_or_default(),
-        hacking_drone_system: (sys == System::Hacking)
+        hacking_target_system: (sys == System::Hacking)
             .then(|| {
                 let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::HackingSystem>() };
                 system
@@ -5349,18 +5377,18 @@ fn system_desc(
                     .map(|x| x.title.to_str())
             })
             .flatten(),
-        battery_power: (sys == System::Battery).then(|| context::Pair {
+        battery_power: (full_info && sys == System::Battery).then(|| context::Pair {
             current: reactor.map(|x| x.battery_power.max).unwrap_or_default(),
             max: system.effective_power() * 2,
         }),
-        ship_oxygen_level: (sys == System::Oxygen).then(|| {
+        ship_oxygen_level: (crew_info && sys == System::Oxygen).then(|| {
             let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::OxygenSystem>() };
             context::Pair {
                 current: ((system.f_total_oxygen * system.max_oxygen).round() as i32).into(),
                 max: (system.max_oxygen.round() as i32).into(),
             }
         }),
-        artillery_weapon: (sys == System::Artillery).then(|| {
+        artillery_weapon: (weapon_info && sys == System::Artillery).then(|| {
             let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::ArtillerySystem>() };
             weapon_desc(
                 unsafe { xc(system.projectile_factory).unwrap() },
@@ -5451,7 +5479,7 @@ fn system_bp_desc<'a>(
                 system.drone.arrived
             })
             .unwrap_or_default(),
-        hacking_drone_system: (sys == System::Hacking)
+        hacking_target_system: (sys == System::Hacking)
             .then(|| {
                 let system = unsafe { &*ptr::addr_of!(*system).cast::<bindings::HackingSystem>() };
                 system
@@ -5795,21 +5823,21 @@ fn ship_manager_desc(
         systems: IdMap::with(|map| {
             mgr.v_system_list
                 .iter()
-                .filter_map(|x| {
+                .map(|x| {
                     let system = unsafe { xc(*x).unwrap() };
                     if mgr.i_ship_id == 0 || sensors >= 4 {
-                        Some(system_desc(mgr, system, map, sensors, old_context))
+                        system_desc(mgr, system, map, sensors, old_context)
                     } else {
                         let sys = System::from_id(system.i_system_type).unwrap();
                         let bp = sys.blueprint().unwrap();
                         let name = map.map(bp.title.to_str().into());
-                        if let Some(old) = old_systems.get(&name) {
-                            let mut ret = (*old).clone();
-                            ret.stale_info = true;
-                            Some(ret)
+                        let mut ret = if let Some(old) = old_systems.get(&name) {
+                            (*old).clone()
                         } else {
-                            None
-                        }
+                            system_desc(mgr, system, map, sensors, old_context)
+                        };
+                        ret.stale_info = true;
+                        ret
                     }
                 })
                 .collect()
@@ -6259,7 +6287,7 @@ fn store_page(app: &bindings::CApp, force: bool) -> Option<context::StoreItems> 
         .flatten()
 }
 
-fn event_options(gui: &bindings::CommandGui) -> (Option<String>, Vec<String>) {
+fn event_options(gui: &bindings::CommandGui) -> (Option<String>, VecDeque<String>) {
     let c = &gui.choice_box;
     c.base
         .b_open
@@ -6301,7 +6329,7 @@ fn collect_context(
     context::Context,
 ) {
     let mut events = Vec::new();
-    for (ship, weapon) in game.shot_q.drain(..) {
+    for (ship, _, weapon) in game.shot_q.drain(..) {
         if ship == 0 {
             events.push(format!("A player weapon {weapon:?} has fired a shot").into());
         } else {
@@ -6945,6 +6973,18 @@ pub fn loop_hook2(app: &mut CApp) {
             format!("Tips: {}\n\n", tips.join("; "))
         }
     }
+    // FIX: drone projectiles' owner id is set *after* initialization for no reason
+    // the easiest fix is obviously getting the owner id on the next frame
+    for (ship_id, proj, _weap_name) in game.shot_q.iter_mut().rev() {
+        if proj.is_null() {
+            break;
+        }
+        if game.projectiles.contains_key(proj) {
+            *ship_id = unsafe { xc(*proj).unwrap() }.owner_id;
+        }
+        // reset to make sure its never checked again
+        *proj = ptr::null_mut();
+    }
     if !matches!(game.cooldown, Some(time) if time > Instant::now()) {
         let (events, tips, ctx) = collect_context(app, game);
         let mut old_tips = HashMap::new();
@@ -7062,16 +7102,19 @@ pub unsafe fn loop_hook(app: *mut CApp) {
     }
 }
 
-pub unsafe fn projectile_post_init(this: *mut Projectile, weap: *const bindings::WeaponBlueprint) {
+pub unsafe fn projectile_post_init(
+    p_this: *mut Projectile,
+    weap: *const bindings::WeaponBlueprint,
+) {
     let Some(game) = GAME.get_mut() else {
         return;
     };
     let weap = xb(weap).unwrap();
     game.projectiles
-        .insert(this, weap.desc.title.to_str().into_owned());
-    let this = xc(this).unwrap();
+        .insert(p_this, weap.desc.title.to_str().into_owned());
+    let this = xc(p_this).unwrap();
     game.shot_q
-        .push((this.owner_id, weap.desc.title.to_str().into_owned()));
+        .push((this.owner_id, p_this, weap.desc.title.to_str().into_owned()));
 }
 
 pub unsafe fn projectile_pre_dtor(this: *mut Projectile) {
