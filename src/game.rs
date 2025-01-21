@@ -30,7 +30,8 @@ pub mod actions;
 mod context;
 pub mod strings;
 
-const TIP_TIMEOUT: Duration = Duration::from_secs(5);
+const TIP_TIMEOUT: Duration = Duration::from_millis(500);
+const COOLDOWN: Duration = Duration::from_secs(1);
 
 fn meta<T: Action>() -> neuro_sama::schema::Action {
     neuro_sama::schema::Action {
@@ -41,6 +42,7 @@ fn meta<T: Action>() -> neuro_sama::schema::Action {
 }
 
 struct State {
+    cooldown: Option<Instant>,
     tx: mpsc::Sender<tungstenite::Message>,
     rx: mpsc::Receiver<Option<tungstenite::Message>>,
     app: *mut CApp,
@@ -6682,6 +6684,16 @@ fn collect_context(
             );
             bad = true;
         }
+        if ship
+            .systems
+            .iter()
+            .any(|x| matches!(x.hp, Some(x) if x.current < x.max) || x.breached || x.on_fire)
+        {
+            tips.push(
+                "Some of your systems are damaged, you may use the `move_crew` action to move crew members to the system rooms for repairing them".into(),
+            );
+            bad = true;
+        }
         if mgr.i_intruder_count > 0 {
             tips.push("There are intruders on your ship! You may move your crew to fight them with the `move_crew` action".into());
             tips.push("You can use the `pause` action at any time to give yourself more time to think or talk to chat".into());
@@ -6710,6 +6722,9 @@ fn collect_context(
         }
         tips.push("Use `increase_system_power` and `decrease_system_power` actions to distribute power across the ship".into());
         if ret.enemy_ship.is_some() {
+            if matches!(mgr.shield_system(), Some(x) if x.base.available_power() > 0) {
+                tips.push("Your shields can be powered more, it might be a good idea to redistribute power from other systems".into());
+            }
             if !gui.b_paused {
                 tips.push("You are currently engaged in combat".into());
                 tips.push("You can use the `pause` action at any time to give yourself more time to think or talk to chat".into());
@@ -6777,6 +6792,7 @@ pub fn loop_hook2(app: &mut CApp) {
             let (game2ws_tx, mut game2ws_rx) = mpsc::channel(128);
             let (ws2game_tx, ws2game_rx) = mpsc::channel(128);
             let state = State {
+                cooldown: None,
                 tx: game2ws_tx,
                 rx: ws2game_rx,
                 app: ptr::null_mut(),
@@ -6889,6 +6905,7 @@ pub fn loop_hook2(app: &mut CApp) {
     }
     while let Ok(msg) = game.rx.try_recv() {
         if let Some(msg) = msg {
+            game.cooldown = None;
             if let Err(err) = game.handle_message(msg) {
                 log::error!("error handling message: {err}");
             } else {
@@ -6900,7 +6917,6 @@ pub fn loop_hook2(app: &mut CApp) {
             log::error!("error starting up: {err}");
         }
     }
-    let (events, tips, ctx) = collect_context(app, game);
 
     fn format_events(events: Vec<Cow<'static, str>>) -> String {
         if events.is_empty() {
@@ -6929,46 +6945,54 @@ pub fn loop_hook2(app: &mut CApp) {
             format!("Tips: {}\n\n", tips.join("; "))
         }
     }
-    let mut old_tips = HashMap::new();
-    mem::swap(&mut old_tips, &mut game.tips);
-    if let Some(buf) = game.buffer.take() {
-        if let Some(delta) = ctx.delta(&buf, &mut context::util::DeltaContext::default()) {
-            if let Err(err) = game.context(
-                format!(
-                    "{}{}Game state changes (not the entire state). If you forgot something, use the `remind`/`remind_ship` actions: {}",
-                    format_events(events),
-                    format_tips(tips, &mut old_tips),
-                    serde_json::to_string(&delta).unwrap(),
-                ),
-                false,
-            ) {
-                log::error!("error sending context delta: {err}");
+    if !matches!(game.cooldown, Some(time) if time > Instant::now()) {
+        let (events, tips, ctx) = collect_context(app, game);
+        let mut old_tips = HashMap::new();
+        mem::swap(&mut old_tips, &mut game.tips);
+        if let Some(buf) = game.buffer.take() {
+            if let Some(delta) = ctx.delta(&buf, &mut context::util::DeltaContext::default()) {
+                game.cooldown = Some(Instant::now() + COOLDOWN);
+                if let Err(err) = game.context(
+                    format!(
+                        "{}{}Game state changes (not the entire state). If you forgot something, use the `remind`/`remind_ship` actions: {}",
+                        format_events(events),
+                        format_tips(tips, &mut old_tips),
+                        serde_json::to_string(&delta).unwrap(),
+                    ),
+                    false,
+                ) {
+                    log::error!("error sending context delta: {err}");
+                }
+            } else if !events.is_empty() {
+                game.cooldown = Some(Instant::now() + COOLDOWN);
+                if let Err(err) = game.context(
+                    format!(
+                        "{}{}",
+                        format_events(events),
+                        format_tips(tips, &mut old_tips),
+                    ),
+                    false,
+                ) {
+                    log::error!("error sending events context: {err}");
+                }
             }
-        } else if !events.is_empty() {
+        } else {
+            game.cooldown = Some(Instant::now() + COOLDOWN);
             if let Err(err) = game.context(
                 format!(
-                    "{}{}",
+                    "{}{}This is the current game state in JSON format. After this, you won't receive full state snapshots anymore, only the changed parts. If you forgot something, use the `remind` or `remind_ship` action to resend context about something: {}",
                     format_events(events),
                     format_tips(tips, &mut old_tips),
+                    serde_json::to_string(&ctx.serializable(&mut context::util::SerContext::default())).unwrap(),
                 ),
-                false,
+                false
             ) {
-                log::error!("error sending events context: {err}");
+                log::error!("error sending initial context: {err}");
             }
         }
-    } else if let Err(err) = game.context(
-        format!(
-            "{}{}This is the current game state in JSON format. After this, you won't receive full state snapshots anymore, only the changed parts. If you forgot something, use the `remind` or `remind_ship` action to resend context about something: {}",
-            format_events(events),
-            format_tips(tips, &mut old_tips),
-            serde_json::to_string(&ctx.serializable(&mut context::util::SerContext::default())).unwrap(),
-        ),
-        false
-    ) {
-        log::error!("error sending initial context: {err}");
+        mem::swap(&mut old_tips, &mut game.tips);
+        game.buffer = Some(ctx);
     }
-    mem::swap(&mut old_tips, &mut game.tips);
-    game.buffer = Some(ctx);
     if let Some(mut force) = game.actions.force.clone() {
         if matches!(force.send_at, Some(x) if x < Instant::now()) {
             force.send_at = None;
