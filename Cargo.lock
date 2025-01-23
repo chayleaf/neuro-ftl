@@ -477,7 +477,7 @@ dependencies = [
 
 [[package]]
 name = "neuro_ftl"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "ctor",
  "env_logger",

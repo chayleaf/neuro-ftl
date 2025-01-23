@@ -6989,7 +6989,13 @@ pub fn loop_hook2(app: &mut CApp) {
         let (events, tips, ctx) = collect_context(app, game);
         let mut old_tips = HashMap::new();
         mem::swap(&mut old_tips, &mut game.tips);
-        if let Some(buf) = game.buffer.take() {
+        if let Some(mut buf) = game.buffer.take() {
+            // resend full player ship info in every new location
+            if matches!((&buf.current_location, &ctx.current_location), (Some(a), Some(b)) if a != b)
+            {
+                buf.player_ship = None;
+                buf.inventory = None;
+            }
             if let Some(delta) = ctx.delta(&buf, &mut context::util::DeltaContext::default()) {
                 game.cooldown = Some(Instant::now() + COOLDOWN);
                 if let Err(err) = game.context(
